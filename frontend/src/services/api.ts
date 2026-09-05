@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { AuthResponse, User, UserProfileSummary } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -8,7 +9,28 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attach JWT Bearer token if present
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('aidatascience_auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const apiService = {
+  // ─── Auth & User Profile ───────────────────────────────────────────
+  login: (email: string, password: string): Promise<AuthResponse> =>
+    api.post('/auth/login', { email, password }).then(r => r.data),
+  register: (data: { name: string; email: string; password: string; bio?: string }): Promise<AuthResponse> =>
+    api.post('/auth/register', data).then(r => r.data),
+  getMe: (): Promise<User> =>
+    api.get('/auth/me').then(r => r.data),
+  getProfile: (): Promise<UserProfileSummary> =>
+    api.get('/auth/profile').then(r => r.data),
+  updateProfile: (data: { name?: string; bio?: string; avatar?: string }): Promise<User> =>
+    api.put('/auth/profile', data).then(r => r.data),
+
   // ─── Health ────────────────────────────────────────────────────────
   health: () => api.get('/health').then(r => r.data),
   getHealth: () => api.get('/health').then(r => r.data),

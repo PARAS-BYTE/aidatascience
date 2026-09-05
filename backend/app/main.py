@@ -14,13 +14,21 @@ from fastapi.responses import JSONResponse
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import logger
-from app.db.database import Base, engine, upgrade_sqlite_schema
+from app.db.database import Base, engine, upgrade_sqlite_schema, SessionLocal
+from app.services.auth_service import AuthService
 
 
 def create_application() -> FastAPI:
     # Ensure database schema is ready
     Base.metadata.create_all(bind=engine)
     upgrade_sqlite_schema()
+
+    # Ensure default user exists and orphan data is migrated
+    with SessionLocal() as init_db:
+        try:
+            AuthService.ensure_default_user_and_migrate_orphans(init_db)
+        except Exception as e:
+            logger.warning(f"Default user migration error: {e}")
 
     app = FastAPI(
         title=settings.PROJECT_NAME,

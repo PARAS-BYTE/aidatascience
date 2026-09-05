@@ -8,19 +8,29 @@ from app.services.dataset_service import DatasetService
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 
+from app.api.deps import get_optional_user
+from app.db.models import User
+
+
 @router.post("/upload", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
 async def upload_dataset(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """Upload a new CSV or XLSX dataset."""
-    return await DatasetService.save_dataset(db, file)
+    user_id = current_user.id if current_user else None
+    return await DatasetService.save_dataset(db, file, user_id=user_id)
 
 
 @router.get("", response_model=DatasetListResponse)
-def list_datasets(db: Session = Depends(get_db)):
-    """List all uploaded datasets."""
-    datasets = DatasetService.get_all(db)
+def list_datasets(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """List uploaded datasets for the current user."""
+    user_id = current_user.id if current_user else None
+    datasets = DatasetService.get_all(db, user_id=user_id)
     return DatasetListResponse(total=len(datasets), items=datasets)
 
 

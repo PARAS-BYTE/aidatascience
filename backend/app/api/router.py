@@ -1,8 +1,9 @@
 from fastapi import APIRouter
-from app.api.routes import datasets, health, jobs, eda, cleaning, task, experiments, models, agent, feature_engineering, multi_agent, dashboard, forecasting
+from app.api.routes import auth, datasets, health, jobs, eda, cleaning, task, experiments, models, agent, feature_engineering, multi_agent, dashboard, forecasting
 
 api_router = APIRouter()
 
+api_router.include_router(auth.router)
 api_router.include_router(health.router)
 api_router.include_router(datasets.router)
 api_router.include_router(jobs.router)

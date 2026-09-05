@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Database, BarChart3, Eraser, Sparkles, FlaskConical,
   Box, Brain, MessageSquare, Rocket, Activity, Settings, Cpu,
-  ListChecks, ChevronLeft, ChevronRight, Zap, TrendingUp, HelpCircle
+  ListChecks, ChevronLeft, ChevronRight, Zap, TrendingUp, HelpCircle, User
 } from 'lucide-react';
 
 const navSections = [
@@ -11,6 +11,7 @@ const navSections = [
     label: 'Overview',
     items: [
       { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+      { name: 'My Profile', path: '/profile', icon: User },
       { name: 'Datasets', path: '/datasets', icon: Database },
     ],
   },

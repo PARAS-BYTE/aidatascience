@@ -39,7 +39,7 @@ class DatasetService:
         return ext
 
     @staticmethod
-    async def save_dataset(db: Session, file: UploadFile) -> Dataset:
+    async def save_dataset(db: Session, file: UploadFile, user_id: Optional[str] = None) -> Dataset:
         """Saves uploaded file to disk and records metadata in database."""
         ext = DatasetService.validate_file(file)
 
@@ -83,6 +83,7 @@ class DatasetService:
         # Save record to DB
         dataset = Dataset(
             id=unique_id,
+            user_id=user_id,
             original_filename=sanitize_filename(file.filename),
             stored_filename=stored_filename,
             file_path=target_path,
@@ -95,13 +96,26 @@ class DatasetService:
         db.commit()
         db.refresh(dataset)
 
-        logger.info(f"Successfully uploaded dataset '{dataset.original_filename}' (ID: {dataset.id}, Size: {file_size} bytes)")
+        # Log activity
+        from app.services.auth_service import AuthService
+        AuthService.log_activity(
+            db=db,
+            user_id=user_id,
+            action="UPLOAD_DATASET",
+            title=f"Uploaded {dataset.original_filename}",
+            details=f"Stored as {dataset.file_type} ({round(file_size / (1024 * 1024), 2)} MB)",
+        )
+
+        logger.info(f"Successfully uploaded dataset '{dataset.original_filename}' (ID: {dataset.id}, User: {user_id})")
         return dataset
 
     @staticmethod
-    def get_all(db: Session) -> List[Dataset]:
-        """Retrieves all uploaded datasets ordered by creation time descending."""
-        return db.query(Dataset).order_by(Dataset.created_at.desc()).all()
+    def get_all(db: Session, user_id: Optional[str] = None) -> List[Dataset]:
+        """Retrieves datasets for user ordered by creation time descending."""
+        query = db.query(Dataset)
+        if user_id:
+            query = query.filter((Dataset.user_id == user_id) | (Dataset.user_id.is_(None)))
+        return query.order_by(Dataset.created_at.desc()).all()
 
     @staticmethod
     def get_by_id(db: Session, dataset_id: str) -> Optional[Dataset]:

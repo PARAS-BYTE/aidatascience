@@ -77,10 +77,45 @@ class ExperimentStatus(str, enum.Enum):
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(30), default="data_scientist", nullable=False)
+    avatar = Column(String(50), default="DS", nullable=False)
+    bio = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    # Relationships
+    datasets = relationship("Dataset", back_populates="user", cascade="all, delete-orphan")
+    jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
+    experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
+    models = relationship("MLModel", back_populates="user", cascade="all, delete-orphan")
+    activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
+
+
+class UserActivity(Base):
+    __tablename__ = "user_activities"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(50), nullable=False)  # UPLOAD_DATASET, RUN_EDA, CLEAN_DATA, TRAIN_MODEL, etc.
+    title = Column(String(255), nullable=False)
+    details = Column(Text, nullable=True)  # JSON metadata or description
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    user = relationship("User", back_populates="activities")
+
+
 class Dataset(Base):
     __tablename__ = "datasets"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     original_filename = Column(String(255), nullable=False)
     stored_filename = Column(String(255), nullable=False, unique=True)
     file_path = Column(String(512), nullable=False)
@@ -100,6 +135,7 @@ class Dataset(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
+    user = relationship("User", back_populates="datasets")
     experiments = relationship("Experiment", back_populates="dataset", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="dataset", cascade="all, delete-orphan")
 
@@ -108,6 +144,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     job_type = Column(SQLEnum(JobType), nullable=False)
     status = Column(SQLEnum(JobStatus), default=JobStatus.QUEUED, nullable=False)
     progress = Column(Float, default=0.0, nullable=False)
@@ -125,6 +162,7 @@ class Job(Base):
     result_data = Column(Text, nullable=True)
 
     # Relationships
+    user = relationship("User", back_populates="jobs")
     dataset = relationship("Dataset", back_populates="jobs")
     experiment = relationship("Experiment", back_populates="jobs")
     model = relationship("MLModel", back_populates="jobs")
@@ -134,6 +172,7 @@ class Experiment(Base):
     __tablename__ = "experiments"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False)
     target_column = Column(String(255), nullable=False)
@@ -156,6 +195,7 @@ class Experiment(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
+    user = relationship("User", back_populates="experiments")
     dataset = relationship("Dataset", back_populates="experiments")
     jobs = relationship("Job", back_populates="experiment")
     models = relationship("MLModel", back_populates="experiment", cascade="all, delete-orphan")
@@ -165,6 +205,7 @@ class MLModel(Base):
     __tablename__ = "ml_models"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     version = Column(Integer, default=1, nullable=False)
     experiment_id = Column(String(36), ForeignKey("experiments.id"), nullable=False)
@@ -183,6 +224,7 @@ class MLModel(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
+    user = relationship("User", back_populates="models")
     experiment = relationship("Experiment", back_populates="models")
     deployments = relationship("Deployment", back_populates="model", cascade="all, delete-orphan")
     monitoring_records = relationship("MonitoringRecord", back_populates="model", cascade="all, delete-orphan")

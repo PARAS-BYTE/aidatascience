@@ -50,6 +50,7 @@ class ModelService:
         ml_model = MLModel(
             name=model_name,
             version=version,
+            user_id=experiment.user_id,
             experiment_id=experiment_id,
             dataset_id=experiment.dataset_id,
             task_type=experiment.task_type,
@@ -66,6 +67,15 @@ class ModelService:
         db.add(ml_model)
         db.commit()
         db.refresh(ml_model)
+
+        from app.services.auth_service import AuthService
+        AuthService.log_activity(
+            db=db,
+            user_id=experiment.user_id,
+            action="REGISTER_MODEL",
+            title=f"Registered model {ml_model.name} (v{version})",
+            details=f"Algorithm: {ml_model.algorithm}, Target: {ml_model.target_column}",
+        )
 
         # Auto-compute SHAP on registration & save Parquet (B3)
         try:

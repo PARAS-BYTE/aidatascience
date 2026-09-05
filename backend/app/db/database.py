@@ -28,11 +28,21 @@ def upgrade_sqlite_schema() -> None:
         return
 
     additions = {
-        "datasets": {"validation_schema": "TEXT"},
+        "datasets": {
+            "validation_schema": "TEXT",
+            "user_id": "VARCHAR(36)",
+        },
         "jobs": {
             "budget_seconds": "INTEGER",
             "elimination_log": "TEXT",
             "forecast_config": "TEXT",
+            "user_id": "VARCHAR(36)",
+        },
+        "experiments": {
+            "user_id": "VARCHAR(36)",
+        },
+        "ml_models": {
+            "user_id": "VARCHAR(36)",
         },
         "deployments": {
             "role": "VARCHAR(20) DEFAULT 'champion'",

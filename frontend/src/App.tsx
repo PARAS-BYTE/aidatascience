@@ -17,6 +17,7 @@ import { Jobs } from './pages/Jobs';
 import { Settings } from './pages/Settings';
 import { AskData } from './pages/AskData';
 import { Forecasting } from './pages/Forecasting';
+import { Profile } from './pages/Profile';
 
 export function App() {
   return (
@@ -24,6 +25,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Dashboard />} />
+          <Route path="profile" element={<Profile />} />
           <Route path="datasets" element={<Datasets />} />
           <Route path="datasets/:id" element={<DatasetDetails />} />
           <Route path="eda" element={<EDA />} />

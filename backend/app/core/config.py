@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
 
+    # Auth & Security
+    SECRET_KEY: str = "aidatascience-jwt-production-secret-key-3142921b"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
 

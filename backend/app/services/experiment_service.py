@@ -215,6 +215,7 @@ class ExperimentService:
                 # Create experiment record
                 experiment = Experiment(
                     name=f"{entry['display_name']} on {dataset.original_filename}",
+                    user_id=dataset.user_id,
                     dataset_id=dataset_id,
                     target_column=target,
                     task_type=TaskType(task_type),
