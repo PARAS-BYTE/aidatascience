@@ -1,0 +1,24 @@
+{
+  "numerical_columns": [
+    "Age",
+    "Avg_Daily_Usage_Hours",
+    "Sleep_Hours_Per_Night",
+    "Mental_Health_Score",
+    "Conflicts_Over_Social_Media",
+    "Addicted_Score",
+    "Age_x_Avg_Daily_Usage_Hours",
+    "Age_x_Sleep_Hours_Per_Night",
+    "Age_x_Mental_Health_Score",
+    "Age_x_Conflicts_Over_Social_Media",
+    "Age_x_Addicted_Score"
+  ],
+  "categorical_columns": [
+    "Gender",
+    "Academic_Level",
+    "Country",
+    "Most_Used_Platform",
+    "Affects_Academic_Performance"
+  ],
+  "has_label_encoder": true,
+  "label_encoder_path": "./models/saved\\9f136a30-24fa-487f-9efb-7a1d530671c8_logistic_regression_1788459939\\preprocessing_label_encoder.joblib"
+}

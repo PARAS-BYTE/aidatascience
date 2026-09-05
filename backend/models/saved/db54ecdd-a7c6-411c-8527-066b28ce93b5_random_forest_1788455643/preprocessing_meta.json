@@ -1,0 +1,23 @@
+{
+  "numerical_columns": [
+    "Age",
+    "Sleep_Hours_Per_Night",
+    "Mental_Health_Score",
+    "Conflicts_Over_Social_Media",
+    "Addicted_Score",
+    "Addicted_Score_x_Conflicts_Over_Social_Media",
+    "Addicted_Score_x_Mental_Health_Score",
+    "Addicted_Score_x_Sleep_Hours_Per_Night",
+    "Addicted_Score_x_Age",
+    "Conflicts_Over_Social_Media_x_Mental_Health_Score"
+  ],
+  "categorical_columns": [
+    "Gender",
+    "Academic_Level",
+    "Country",
+    "Most_Used_Platform",
+    "Affects_Academic_Performance",
+    "Relationship_Status"
+  ],
+  "has_label_encoder": false
+}

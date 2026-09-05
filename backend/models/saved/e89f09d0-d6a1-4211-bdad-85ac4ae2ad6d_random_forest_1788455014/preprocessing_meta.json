@@ -1,0 +1,13 @@
+{
+  "numerical_columns": [
+    "age",
+    "income",
+    "credit_score",
+    "income_x_credit_score",
+    "income_x_age",
+    "credit_score_x_age"
+  ],
+  "categorical_columns": [],
+  "has_label_encoder": true,
+  "label_encoder_path": "./models/saved\\e89f09d0-d6a1-4211-bdad-85ac4ae2ad6d_random_forest_1788455014\\preprocessing_label_encoder.joblib"
+}

@@ -1,0 +1,24 @@
+{
+  "numerical_columns": [
+    "Age",
+    "Avg_Daily_Usage_Hours",
+    "Sleep_Hours_Per_Night",
+    "Mental_Health_Score",
+    "Conflicts_Over_Social_Media",
+    "Mental_Health_Score_x_Conflicts_Over_Social_Media",
+    "Mental_Health_Score_x_Avg_Daily_Usage_Hours",
+    "Mental_Health_Score_x_Sleep_Hours_Per_Night",
+    "Mental_Health_Score_x_Age",
+    "Conflicts_Over_Social_Media_x_Avg_Daily_Usage_Hours"
+  ],
+  "categorical_columns": [
+    "Gender",
+    "Academic_Level",
+    "Country",
+    "Most_Used_Platform",
+    "Affects_Academic_Performance",
+    "Relationship_Status"
+  ],
+  "has_label_encoder": true,
+  "label_encoder_path": "./models/saved\\54d7b072-323a-4492-a312-37e94254bb1c_random_forest_1788528442\\preprocessing_label_encoder.joblib"
+}

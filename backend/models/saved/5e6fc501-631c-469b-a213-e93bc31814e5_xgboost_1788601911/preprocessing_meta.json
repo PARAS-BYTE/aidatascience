@@ -1,0 +1,13 @@
+{
+  "numerical_columns": [
+    "feature1",
+    "feature2",
+    "feature3",
+    "feature3_x_feature1",
+    "feature3_x_feature2",
+    "feature1_x_feature2"
+  ],
+  "categorical_columns": [],
+  "has_label_encoder": true,
+  "label_encoder_path": "./models/saved\\5e6fc501-631c-469b-a213-e93bc31814e5_xgboost_1788601911\\preprocessing_label_encoder.joblib"
+}

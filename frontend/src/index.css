@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+body { margin: 0; font-family: 'DM Sans', Inter, system-ui, sans-serif; background: #f6f8fc; color: #172033; -webkit-font-smoothing: antialiased; }
+code, .font-mono { font-family: 'DM Mono', ui-monospace, monospace; }
+* { scroll-behavior: smooth; }
+::selection { background: #dbeafe; color: #172033; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 20px; }
+
+@keyframes pageEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes softPulse { 0%,100% { opacity: .55; transform: scale(.96); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes spinSlow { to { transform: rotate(360deg); } }
+@keyframes bounceSubtle { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.animate-fade-in, .animate-fade-in-up, .animate-fade-in-down, .animate-slide-in-left, .animate-slide-in-right, .animate-scale-in { animation: pageEnter .35s cubic-bezier(.2,.8,.2,1) both; }
+.animate-bounce-subtle { animation: bounceSubtle 1.35s ease-in-out infinite; }
+.animate-spin-slow { animation: spinSlow 3s linear infinite; }
+.animate-pulse-glow, .animate-pulse-glow-green, .animate-pulse-glow-purple { animation: softPulse 2.2s ease-in-out infinite; }
+.skeleton { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 12px; }
+
+/* A quiet, application-like light surface system. These remap legacy utilities
+   while individual pages are progressively migrated to semantic components. */
+.glass, .glass-card, .glass-sidebar { background: rgba(255,255,255,.88) !important; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-color: #e5eaf2 !important; }
+.glass-sidebar { background: #fbfcfe !important; }
+.bg-\[\#030712\] { background-color: #f6f8fc !important; }
+[class*="bg-slate-900"] { background-color: #ffffff !important; }
+[class*="bg-slate-950"] { background-color: #f8fafc !important; }
+[class*="bg-slate-800"] { background-color: #f1f5f9 !important; }
+[class*="bg-slate-700"] { background-color: #e2e8f0 !important; }
+[class*="border-slate-8"], [class*="border-slate-7"] { border-color: #e2e8f0 !important; }
+.text-slate-100, .text-slate-200 { color: #172033 !important; }
+.text-slate-300 { color: #334155 !important; }
+.text-slate-400 { color: #526177 !important; }
+.text-slate-500, .text-slate-600 { color: #718096 !important; }
+.placeholder-slate-500::placeholder { color: #94a3b8 !important; }
+.text-sky-400 { color: #2563eb !important; }
+.text-emerald-400 { color: #047857 !important; }
+.text-amber-400 { color: #b45309 !important; }
+.text-rose-400 { color: #be123c !important; }
+[class*="shadow-xl"], [class*="shadow-lg"] { box-shadow: 0 8px 24px rgba(15,23,42,.06) !important; }
+[class*="bg-purple-950"], [class*="bg-emerald-950"], [class*="bg-red-950"] { background-color: #f8fafc !important; }
+.card-hover { transition: transform .2s ease, box-shadow .2s ease; }
+.card-hover:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15,23,42,.09) !important; }
+input, select, textarea { color: #172033 !important; background-color: #fff !important; border-color: #dbe3ee !important; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,.14); }
+button { transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease; }
+button:not(:disabled):active { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
