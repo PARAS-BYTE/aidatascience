@@ -45,7 +45,7 @@ def create_application() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins if not has_wildcard else [],
-        allow_origin_regex=r".*" if has_wildcard else r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$|^https://.*\.vercel\.app$",
+        allow_origin_regex=r".*" if has_wildcard else r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$|^https://.*\.vercel\.app$|^https://.*\.onrender\.com$|^https://.*\.hf\.space$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

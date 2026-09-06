@@ -541,7 +541,7 @@ export const Experiments: React.FC = () => {
                   {exp.status === 'COMPLETED' && (
                     <div className="flex items-center gap-1.5 ml-2">
                       <a
-                        href={`http://localhost:8000/api/experiments/${exp.id}/export?format=notebook`}
+                        href={`/api/experiments/${exp.id}/export?format=notebook`}
                         download={`pipeline_${exp.id.slice(0,8)}.ipynb`}
                         className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-500/30 flex items-center gap-1 transition-colors"
                         title="Export as Jupyter Notebook"
@@ -549,7 +549,7 @@ export const Experiments: React.FC = () => {
                         <Download className="w-3 h-3" /> .ipynb
                       </a>
                       <a
-                        href={`http://localhost:8000/api/experiments/${exp.id}/export?format=script`}
+                        href={`/api/experiments/${exp.id}/export?format=script`}
                         download={`pipeline_${exp.id.slice(0,8)}.py`}
                         className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 flex items-center gap-1 transition-colors"
                         title="Export as Python Script"
