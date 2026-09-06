@@ -127,6 +127,8 @@ export const apiService = {
     api.put(`/models/${id}/status?new_status=${newStatus}`).then(r => r.data),
   predict: (modelId: string, features: Record<string, any>) =>
     api.post(`/models/${modelId}/predict`, { features }).then(r => r.data),
+  getModelSampleInput: (modelId: string) =>
+    api.get(`/models/${modelId}/sample-input`).then(r => r.data),
 
   // ─── Explainability ────────────────────────────────────────────────
   getExplainability: (modelId: string) =>

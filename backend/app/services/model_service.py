@@ -99,7 +99,15 @@ class ModelService:
             query = query.filter(MLModel.user_id == user_id)
         model_record = query.first()
         if not model_record:
-            raise ValueError(f"Model {model_id} not found")
+            # Check if this model has an active deployment (allows serving without owner token)
+            active_dep = db.query(Deployment).filter(
+                Deployment.model_id == model_id,
+                Deployment.status == DeploymentStatus.ACTIVE
+            ).first()
+            if active_dep:
+                model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+            if not model_record:
+                raise ValueError(f"Model {model_id} not found")
 
         # Load model and preprocessing pipeline
         model = joblib.load(model_record.artifact_path)
@@ -154,6 +162,119 @@ class ModelService:
             "probability": probability,
             "model_id": model_id,
             "model_version": model_record.version,
+        }
+
+    @staticmethod
+    def get_sample_input(db: Session, model_id: str) -> Dict[str, Any]:
+        """Extract exact expected features, real sample rows from dataset, and types for a model."""
+        model = db.query(MLModel).filter(MLModel.id == model_id).first()
+        if not model:
+            raise ValueError(f"Model {model_id} not found")
+
+        from app.db.models import Dataset
+        from app.services.profiler import DatasetProfiler
+
+        num_cols: List[str] = []
+        cat_cols: List[str] = []
+        if model.preprocessing_path:
+            meta_path = os.path.join(model.preprocessing_path, "preprocessing_meta.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                        num_cols = meta.get("numerical_columns", [])
+                        cat_cols = meta.get("categorical_columns", [])
+                except Exception as e:
+                    logger.warning(f"Error reading preprocessing meta: {e}")
+
+        expected_cols = [c for c in num_cols + cat_cols]
+        if not expected_cols and model.feature_names:
+            try:
+                raw_names = json.loads(model.feature_names)
+                expected_cols = [c for c in raw_names if not any(c.startswith(f"{cat}_") for cat in cat_cols)]
+            except Exception:
+                pass
+
+        dataset = db.query(Dataset).filter(Dataset.id == model.dataset_id).first() if model.dataset_id else None
+        df = None
+        if dataset:
+            try:
+                resolved = DatasetProfiler.resolve_path(dataset.file_path)
+                if os.path.exists(resolved):
+                    df = pd.read_csv(resolved, nrows=15)
+                elif dataset.cleaned_file_path:
+                    cln = DatasetProfiler.resolve_path(dataset.cleaned_file_path)
+                    if os.path.exists(cln):
+                        df = pd.read_csv(cln, nrows=15)
+            except Exception as err:
+                logger.warning(f"Could not load dataset for model {model_id} sample: {err}")
+
+        if not expected_cols and df is not None:
+            expected_cols = [c for c in df.columns if c != model.target_column and not c.lower().endswith("id")]
+
+        features_schema: Dict[str, Any] = {}
+        samples: List[Dict[str, Any]] = []
+
+        if df is not None and not df.empty:
+            for col in expected_cols:
+                is_num = col in num_cols or (col in df.columns and pd.api.types.is_numeric_dtype(df[col]))
+                options = []
+                if not is_num and col in df.columns:
+                    options = [str(x) for x in df[col].dropna().unique()[:12].tolist()]
+                features_schema[col] = {
+                    "type": "numeric" if is_num else "categorical",
+                    "options": options,
+                }
+
+            # Extract up to 3 distinct rows
+            for r_idx in range(min(3, len(df))):
+                row = df.iloc[r_idx]
+                sample: Dict[str, Any] = {}
+                for col in expected_cols:
+                    is_num = features_schema.get(col, {}).get("type") == "numeric"
+                    if col in df.columns:
+                        val = row[col]
+                        if pd.isna(val):
+                            sample[col] = 0 if is_num else "Unknown"
+                        elif is_num:
+                            try:
+                                sample[col] = int(val) if float(val).is_integer() else round(float(val), 4)
+                            except Exception:
+                                sample[col] = 0
+                        else:
+                            sample[col] = str(val)
+                    else:
+                        if "_x_" in col:
+                            parts = col.split("_x_")
+                            if len(parts) == 2 and parts[0] in sample and parts[1] in sample:
+                                try:
+                                    sample[col] = round(float(sample[parts[0]]) * float(sample[parts[1]]), 4)
+                                except Exception:
+                                    sample[col] = 0
+                            else:
+                                sample[col] = 0
+                        else:
+                            sample[col] = 0 if is_num else "Unknown"
+                samples.append(sample)
+        else:
+            for col in expected_cols:
+                is_num = col in num_cols
+                features_schema[col] = {"type": "numeric" if is_num else "categorical", "options": []}
+            sample = {}
+            for col in expected_cols:
+                sample[col] = 10 if features_schema[col]["type"] == "numeric" else "SampleValue"
+            samples.append(sample)
+
+        return {
+            "model_id": model.id,
+            "model_name": model.name,
+            "algorithm": model.algorithm,
+            "task_type": model.task_type.value if hasattr(model.task_type, "value") else str(model.task_type),
+            "target_column": model.target_column,
+            "feature_names": expected_cols,
+            "sample_input": samples[0] if samples else {},
+            "sample_inputs": samples,
+            "features_schema": features_schema,
         }
 
     @staticmethod

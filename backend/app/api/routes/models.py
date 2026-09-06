@@ -13,6 +13,7 @@ from app.api.deps import get_current_user, get_optional_user
 from app.schemas.dataset import (
     ModelResponse, ModelListResponse, PredictionRequest, PredictionResponse,
     DeploymentRequest, DeploymentResponse, DeploymentListResponse,
+    ModelSampleInputResponse,
     ExplainabilityResponse, PredictionExplanation,
     ModelHealthResponse, OptimizationRequest, OptimizationResponse,
     JobResponse,
@@ -168,17 +169,22 @@ def predict(
     model_id: str,
     request: PredictionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
-    """Make a prediction using a registered model owned by current user."""
+    """Make a prediction using a registered model. Deployed models serve live requests without requiring token."""
     try:
-        result = ModelService.predict(db, model_id, request.features, user_id=current_user.id)
+        user_id = current_user.id if current_user else None
+        result = ModelService.predict(db, model_id, request.features, user_id=user_id)
 
-        # Log prediction for monitoring
+        # Log prediction for monitoring and track request count
         deployment = db.query(Deployment).filter(
             Deployment.model_id == model_id,
             Deployment.status == DeploymentStatus.ACTIVE,
         ).first()
+
+        if deployment:
+            deployment.request_count = (deployment.request_count or 0) + 1
+            db.commit()
 
         MonitoringService.log_prediction(
             db, model_id, request.features,
@@ -192,6 +198,23 @@ def predict(
     except Exception as e:
         logger.error(f"Prediction failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prediction failed")
+
+
+@router.get("/models/{model_id}/sample-input", response_model=ModelSampleInputResponse)
+def get_model_sample_input(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """Get exact expected features, real sample rows from dataset, and schema for a model."""
+    try:
+        data = ModelService.get_sample_input(db, model_id)
+        return ModelSampleInputResponse(**data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get sample input for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get sample input")
 
 
 # ─── Explainability ──────────────────────────────────────────────────
@@ -230,6 +253,36 @@ def explain_prediction(
 
 # ─── Deployment ──────────────────────────────────────────────────────
 
+def _deployment_to_response(deployment: Deployment, db: Session) -> DeploymentResponse:
+    dep_dict = {
+        "id": deployment.id,
+        "model_id": deployment.model_id,
+        "model_version": deployment.model_version,
+        "endpoint": deployment.endpoint,
+        "status": deployment.status.value if hasattr(deployment.status, "value") else deployment.status,
+        "role": deployment.role,
+        "traffic_pct": deployment.traffic_pct,
+        "request_count": deployment.request_count or 0,
+        "created_at": deployment.created_at,
+        "updated_at": deployment.updated_at,
+    }
+    try:
+        sample_meta = ModelService.get_sample_input(db, deployment.model_id)
+        dep_dict.update({
+            "model_name": sample_meta.get("model_name"),
+            "task_type": sample_meta.get("task_type"),
+            "target_column": sample_meta.get("target_column"),
+            "algorithm": sample_meta.get("algorithm"),
+            "feature_names": sample_meta.get("feature_names"),
+            "sample_input": sample_meta.get("sample_input"),
+            "sample_inputs": sample_meta.get("sample_inputs"),
+            "features_schema": sample_meta.get("features_schema"),
+        })
+    except Exception as e:
+        logger.warning(f"Could not load sample input for deployment {deployment.id}: {e}")
+    return DeploymentResponse(**dep_dict)
+
+
 @router.post("/deployments", response_model=DeploymentResponse)
 def deploy_model(
     request: DeploymentRequest,
@@ -244,7 +297,7 @@ def deploy_model(
             traffic_pct=request.traffic_pct if request.traffic_pct is not None else 1.0,
             user_id=current_user.id,
         )
-        return deployment
+        return _deployment_to_response(deployment, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -264,7 +317,8 @@ def promote_challenger_deployment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
 
     try:
-        return ModelService.promote_challenger(db, deployment_id)
+        promoted = ModelService.promote_challenger(db, deployment_id)
+        return _deployment_to_response(promoted, db)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -274,13 +328,22 @@ def list_deployments(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
-    """List all deployments owned by the current user."""
+    """List deployments owned by current user, or active deployments if guest or empty."""
     if not current_user:
-        return DeploymentListResponse(total=0, items=[])
-    deployments = db.query(Deployment).join(MLModel).filter(
-        MLModel.user_id == current_user.id
-    ).order_by(Deployment.created_at.desc()).all()
-    return DeploymentListResponse(total=len(deployments), items=deployments)
+        deployments = db.query(Deployment).filter(
+            Deployment.status == DeploymentStatus.ACTIVE
+        ).order_by(Deployment.created_at.desc()).limit(15).all()
+    else:
+        deployments = db.query(Deployment).join(MLModel).filter(
+            MLModel.user_id == current_user.id
+        ).order_by(Deployment.created_at.desc()).all()
+        if not deployments:
+            deployments = db.query(Deployment).filter(
+                Deployment.status == DeploymentStatus.ACTIVE
+            ).order_by(Deployment.created_at.desc()).limit(15).all()
+
+    items = [_deployment_to_response(d, db) for d in deployments]
+    return DeploymentListResponse(total=len(items), items=items)
 
 
 @router.delete("/deployments/{deployment_id}")
@@ -527,6 +590,12 @@ def _update_job_progress(db: Session, job_id: str, progress: float, message: str
 
 
 def _model_to_response(model: MLModel) -> ModelResponse:
+    feature_names = None
+    if model.feature_names:
+        try:
+            feature_names = json.loads(model.feature_names)
+        except Exception:
+            pass
     return ModelResponse(
         id=model.id,
         name=model.name,
@@ -539,6 +608,7 @@ def _model_to_response(model: MLModel) -> ModelResponse:
         hyperparameters=json.loads(model.hyperparameters) if model.hyperparameters else None,
         metrics=json.loads(model.metrics) if model.metrics else None,
         status=model.status.value,
+        feature_names=feature_names,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

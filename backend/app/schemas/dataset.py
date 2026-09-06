@@ -277,6 +277,8 @@ class ModelResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    feature_names: Optional[List[str]] = None
+    sample_input: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -316,8 +318,28 @@ class DeploymentResponse(BaseModel):
     request_count: int
     created_at: datetime
     updated_at: datetime
+    model_name: Optional[str] = None
+    task_type: Optional[str] = None
+    target_column: Optional[str] = None
+    algorithm: Optional[str] = None
+    feature_names: Optional[List[str]] = None
+    sample_input: Optional[Dict[str, Any]] = None
+    sample_inputs: Optional[List[Dict[str, Any]]] = None
+    features_schema: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ModelSampleInputResponse(BaseModel):
+    model_id: str
+    model_name: str
+    algorithm: Optional[str] = None
+    task_type: Optional[str] = None
+    target_column: Optional[str] = None
+    feature_names: List[str] = []
+    sample_input: Dict[str, Any] = {}
+    sample_inputs: List[Dict[str, Any]] = []
+    features_schema: Dict[str, Any] = {}
 
 
 class DeploymentListResponse(BaseModel):
