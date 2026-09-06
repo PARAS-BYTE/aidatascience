@@ -41,6 +41,19 @@ class DashboardPatchRequest(BaseModel):
     prompt: str
 
 
+def _get_accessible_dataset(db: Session, dataset_id: str, current_user: User) -> Dataset:
+    sample_names = ["customer_churn.csv", "house_prices.csv"]
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        (Dataset.user_id == current_user.id) | 
+        (Dataset.original_filename.in_(sample_names)) |
+        (current_user.role == "admin")
+    ).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    return dataset
+
+
 @router.post("/chat")
 async def run_multi_agent_chat(
     request: MultiAgentChatRequest,
@@ -50,9 +63,7 @@ async def run_multi_agent_chat(
     """
     Execute the multi-agent parallel pipeline synchronously and return full blackboard & report.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, request.dataset_id, current_user)
 
     try:
         result = await MultiAgentOrchestrator.run_pipeline(
@@ -83,9 +94,7 @@ async def stream_multi_agent_events(
     Server-Sent Events (SSE) live stream yielding DAG execution events,
     agent progress, and incremental dashboard cards.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     async def event_generator():
         try:
@@ -122,9 +131,7 @@ async def run_why_investigation(
     """
     Direct parallel root-cause dimension decomposition.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, request.dataset_id, current_user)
 
     blackboard = get_blackboard(session_id=request.session_id, dataset_id=request.dataset_id)
     MultiAgentOrchestrator.load_dataset_to_blackboard(db=db, dataset_id=request.dataset_id, blackboard=blackboard)
@@ -150,9 +157,7 @@ async def patch_dashboard_spec(
     """
     Incrementally modify and patch the active dashboard spec with natural language.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, request.dataset_id, current_user)
 
     blackboard = get_blackboard(session_id=request.session_id, dataset_id=request.dataset_id)
     MultiAgentOrchestrator.load_dataset_to_blackboard(db=db, dataset_id=request.dataset_id, blackboard=blackboard)

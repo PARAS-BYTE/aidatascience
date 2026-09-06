@@ -41,6 +41,19 @@ class AppendColumnRequest(BaseModel):
     change_summary: Optional[str] = None
 
 
+def _get_accessible_dataset(db: Session, dataset_id: str, current_user: User) -> Dataset:
+    sample_names = ["customer_churn.csv", "house_prices.csv"]
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        (Dataset.user_id == current_user.id) | 
+        (Dataset.original_filename.in_(sample_names)) |
+        (current_user.role == "admin")
+    ).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    return dataset
+
+
 @router.post("/{dataset_id}/unsupervised/cluster")
 def run_clustering(
     dataset_id: str,
@@ -49,9 +62,7 @@ def run_clustering(
     current_user: User = Depends(get_current_user),
 ):
     """Run AutoML clustering (K-Means, DBSCAN, Agglomerative, GMM) with automated segment profiling."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     file_path = dataset.cleaned_file_path or dataset.file_path
     df = DatasetProfiler.load_dataset(file_path)
@@ -80,9 +91,7 @@ def detect_anomalies(
     current_user: User = Depends(get_current_user),
 ):
     """Detect unlabeled anomalies using Isolation Forest or Local Outlier Factor."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     file_path = dataset.cleaned_file_path or dataset.file_path
     df = DatasetProfiler.load_dataset(file_path)
@@ -108,9 +117,7 @@ def run_pca(
     current_user: User = Depends(get_current_user),
 ):
     """Compute Principal Component Analysis (PCA) 2D/3D projections and feature loadings."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     file_path = dataset.cleaned_file_path or dataset.file_path
     df = DatasetProfiler.load_dataset(file_path)
@@ -125,6 +132,7 @@ def run_pca(
 
 
 @router.post("/{dataset_id}/unsupervised/append-labels")
+@router.post("/{dataset_id}/unsupervised/append-column")
 def append_unsupervised_labels(
     dataset_id: str,
     req: AppendColumnRequest,
@@ -132,9 +140,7 @@ def append_unsupervised_labels(
     current_user: User = Depends(get_current_user),
 ):
     """Append predicted cluster IDs or anomaly flags as a new feature and create a new dataset version."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     file_path = dataset.cleaned_file_path or dataset.file_path
     df = DatasetProfiler.load_dataset(file_path)

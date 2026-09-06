@@ -39,13 +39,28 @@ def list_datasets(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
-    """List uploaded datasets for the current authenticated user only, optionally filtered by project."""
+    """List uploaded datasets for the current user plus sample demo datasets."""
+    from app.db.models import Dataset
+    sample_names = ["customer_churn.csv", "house_prices.csv"]
+    
     if not current_user:
-        return DatasetListResponse(total=0, items=[])
-    datasets = DatasetService.get_all(db, user_id=current_user.id)
+        samples = db.query(Dataset).filter(Dataset.original_filename.in_(sample_names)).all()
+        return DatasetListResponse(total=len(samples), items=samples)
+
+    user_datasets = DatasetService.get_all(db, user_id=current_user.id)
+    samples = db.query(Dataset).filter(Dataset.original_filename.in_(sample_names)).all()
+
+    seen_ids = set()
+    combined = []
+    for d in list(user_datasets) + list(samples):
+        if d.id not in seen_ids:
+            seen_ids.add(d.id)
+            combined.append(d)
+
     if project_id:
-        datasets = [d for d in datasets if getattr(d, 'project_id', None) == project_id]
-    return DatasetListResponse(total=len(datasets), items=datasets)
+        combined = [d for d in combined if getattr(d, 'project_id', None) == project_id]
+
+    return DatasetListResponse(total=len(combined), items=combined)
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)
@@ -54,9 +69,16 @@ def get_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get metadata for a specific dataset owned by the current user."""
+    """Get metadata for a specific dataset owned by the current user or sample dataset."""
     dataset = DatasetService.get_by_id(db, dataset_id, user_id=current_user.id)
     if not dataset:
+        from app.db.models import Dataset
+        sample_ds = db.query(Dataset).filter(
+            Dataset.id == dataset_id,
+            Dataset.original_filename.in_(["customer_churn.csv", "house_prices.csv"])
+        ).first()
+        if sample_ds:
+            return sample_ds
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dataset with ID '{dataset_id}' not found.",

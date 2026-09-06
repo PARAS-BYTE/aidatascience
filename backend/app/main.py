@@ -18,17 +18,98 @@ from app.db.database import Base, engine, upgrade_sqlite_schema, SessionLocal
 from app.services.auth_service import AuthService
 
 
+def seed_sample_datasets(db) -> None:
+    """Ensure sample demo datasets exist in the database for immediate testing."""
+    import uuid
+    import json
+    import shutil
+    from app.db.models import Dataset, DatasetVersion, User, UploadStatus
+    from app.services.profiler import DatasetProfiler
+
+    admin_user = db.query(User).filter(User.email == "admin@aidatascience.local").first()
+    if not admin_user:
+        admin_user = db.query(User).first()
+    if not admin_user:
+        return
+
+    samples = [
+        ("customer_churn.csv", "churn"),
+        ("house_prices.csv", "price"),
+    ]
+
+    for filename, default_target in samples:
+        existing = db.query(Dataset).filter(Dataset.original_filename == filename).first()
+        if existing:
+            continue
+
+        candidates = [
+            os.path.join(settings.SAMPLE_DIR, filename),
+            os.path.join(PROJECT_ROOT, "data", "samples", filename),
+            os.path.join("data", "samples", filename),
+            os.path.join("/app", "data", "samples", filename),
+        ]
+        sample_src = next((c for c in candidates if os.path.exists(c)), None)
+        if not sample_src:
+            continue
+
+        unique_id = str(uuid.uuid4())
+        dest_filename = f"{unique_id}.csv"
+        dest_path = os.path.join(settings.UPLOAD_DIR, dest_filename)
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        shutil.copy2(sample_src, dest_path)
+
+        profile_json = None
+        row_count, col_count = None, None
+        try:
+            df = DatasetProfiler.load_dataset(dest_path)
+            profile = DatasetProfiler.generate_profile(df, target_column=default_target if default_target in df.columns else None)
+            profile_json = json.dumps(profile)
+            row_count, col_count = df.shape
+        except Exception as e:
+            logger.warning(f"Failed to profile seeded dataset {filename}: {e}")
+
+        new_ds = Dataset(
+            id=unique_id,
+            user_id=admin_user.id,
+            original_filename=filename,
+            stored_filename=dest_filename,
+            file_path=dest_path,
+            file_size=os.path.getsize(dest_path),
+            file_type="CSV",
+            upload_status=UploadStatus.SUCCESS,
+            profile_data=profile_json,
+            target_column=default_target if default_target in (df.columns if 'df' in locals() and df is not None else []) else None,
+            version=1,
+        )
+        db.add(new_ds)
+        db.commit()
+
+        ver = DatasetVersion(
+            dataset_id=unique_id,
+            version=1,
+            file_path=dest_path,
+            file_size=os.path.getsize(dest_path),
+            row_count=row_count,
+            column_count=col_count,
+            change_summary="Initial demo dataset automatically seeded",
+        )
+        db.add(ver)
+        db.commit()
+        logger.info(f"Auto-seeded demo dataset: {filename} (ID: {unique_id})")
+
+
 def create_application() -> FastAPI:
     # Ensure database schema is ready
     Base.metadata.create_all(bind=engine)
     upgrade_sqlite_schema()
 
-    # Ensure default user exists and orphan data is migrated
+    # Ensure default user exists, orphan data is migrated, and demo datasets are seeded
     with SessionLocal() as init_db:
         try:
             AuthService.ensure_default_user_and_migrate_orphans(init_db)
+            seed_sample_datasets(init_db)
         except Exception as e:
-            logger.warning(f"Default user migration error: {e}")
+            logger.warning(f"Default user/dataset migration error: {e}")
 
     app = FastAPI(
         title=settings.PROJECT_NAME,

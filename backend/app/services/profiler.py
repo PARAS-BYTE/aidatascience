@@ -1,3 +1,4 @@
+import os
 import re
 import pandas as pd
 import numpy as np
@@ -8,10 +9,38 @@ from app.core.logging import logger
 
 class DatasetProfiler:
     @staticmethod
+    def resolve_path(file_path: str) -> str:
+        """Resolve file path across local, Docker, and Render storage paths."""
+        if file_path and os.path.exists(file_path):
+            return file_path
+        if not file_path:
+            return file_path
+
+        from app.core.config import settings
+        filename = os.path.basename(file_path.replace("\\", "/"))
+        candidates = [
+            os.path.join(settings.UPLOAD_DIR, filename),
+            os.path.join(settings.PROCESSED_DIR, filename),
+            os.path.join(settings.SAMPLE_DIR, filename),
+            os.path.join("data", "uploads", filename),
+            os.path.join("data", "processed", filename),
+            os.path.join("data", "samples", filename),
+            os.path.join("/app", "data", "uploads", filename),
+            os.path.join("/app", "data", "processed", filename),
+            os.path.join("/app", "data", "samples", filename),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return file_path
+
+    @staticmethod
     def load_dataset(file_path: str) -> pd.DataFrame:
         """Reads CSV or Excel dataset into a Pandas DataFrame."""
+        file_path = DatasetProfiler.resolve_path(file_path)
         try:
-            if file_path.endswith('.csv'):
+            lower_path = file_path.lower()
+            if lower_path.endswith('.csv'):
                 try:
                     df = pd.read_csv(file_path, encoding='utf-8')
                 except UnicodeDecodeError:

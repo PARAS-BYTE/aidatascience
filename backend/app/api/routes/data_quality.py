@@ -27,6 +27,19 @@ class RemediationActionRequest(BaseModel):
     standardize_fuzzy: bool = True
 
 
+def _get_accessible_dataset(db: Session, dataset_id: str, current_user: User) -> Dataset:
+    sample_names = ["customer_churn.csv", "house_prices.csv"]
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        (Dataset.user_id == current_user.id) | 
+        (Dataset.original_filename.in_(sample_names)) |
+        (current_user.role == "admin")
+    ).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    return dataset
+
+
 @router.get("/{dataset_id}/data-quality")
 def get_data_quality_report(
     dataset_id: str,
@@ -35,12 +48,7 @@ def get_data_quality_report(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieve existing data quality report or calculate on demand."""
-    dataset = db.query(Dataset).filter(
-        Dataset.id == dataset_id,
-        Dataset.user_id == current_user.id,
-    ).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     report = db.query(DataQualityReport).filter(
         DataQualityReport.dataset_id == dataset_id,
@@ -85,12 +93,7 @@ def run_data_quality_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """Force re-run and persist a comprehensive data quality assessment."""
-    dataset = db.query(Dataset).filter(
-        Dataset.id == dataset_id,
-        Dataset.user_id == current_user.id,
-    ).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     target = (body.target_column if body else None) or dataset.target_column
 
@@ -126,12 +129,7 @@ def remediate_dataset_quality(
     current_user: User = Depends(get_current_user),
 ):
     """Apply high-priority quality remediations and create a new dataset version."""
-    dataset = db.query(Dataset).filter(
-        Dataset.id == dataset_id,
-        Dataset.user_id == current_user.id,
-    ).first()
-    if not dataset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    dataset = _get_accessible_dataset(db, dataset_id, current_user)
 
     file_path = dataset.cleaned_file_path or dataset.file_path
     df = DatasetProfiler.load_dataset(file_path)
