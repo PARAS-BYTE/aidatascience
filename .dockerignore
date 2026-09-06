@@ -1,0 +1,30 @@
+# Git and IDE
+.git
+.gitignore
+.gemini
+.vscode
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+
+# Node
+frontend/node_modules
+frontend/.env.local
+frontend/.env.development.local
+frontend/dist
+
+# Python virtual environments
+backend/venv
+backend/.venv
+venv/
+.venv/
+env/
+.env
+
+# Temporary artifacts and logs
+*.log
+.coverage
+htmlcov/

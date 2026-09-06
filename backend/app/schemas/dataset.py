@@ -18,6 +18,8 @@ class DatasetCreate(DatasetBase):
 
 class DatasetResponse(DatasetBase):
     id: str
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
     stored_filename: str
     upload_status: UploadStatus
     target_column: Optional[str] = None

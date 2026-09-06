@@ -1,10 +1,11 @@
-"""Agent API route — Natural language data scientist chat interface with Groq and Prompt Guard."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.core.config import settings
 from app.db.database import get_db
+from app.db.models import User, Dataset
+from app.api.deps import get_current_user, get_optional_user
 from app.schemas.dataset import AgentChatRequest, AgentChatResponse, AutoPilotRequest, AutoPilotResponse
 from app.services.agent_service import AIAgent
 from app.services.prompt_guard_service import PromptGuardService
@@ -12,8 +13,17 @@ from app.services.prompt_guard_service import PromptGuardService
 router = APIRouter(prefix="/agent", tags=["AI Agent"])
 
 @router.post("/chat", response_model=AgentChatResponse)
-def agent_chat(request: AgentChatRequest, db: Session = Depends(get_db)):
+def agent_chat(
+    request: AgentChatRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
     """Send a message to the AI Data Scientist with Prompt Guard protection."""
+    if request.dataset_id and current_user:
+        dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
+        if not dataset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     result = AIAgent.process_message(
         db=db,
         message=request.message,
@@ -26,7 +36,11 @@ def agent_chat(request: AgentChatRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/auto-pilot", response_model=AutoPilotResponse)
-def run_auto_pilot(request: AutoPilotRequest, db: Session = Depends(get_db)):
+def run_auto_pilot(
+    request: AutoPilotRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Execute the autonomous AI data science pipeline:
     1. Intelligence & Target Identification
@@ -36,6 +50,10 @@ def run_auto_pilot(request: AutoPilotRequest, db: Session = Depends(get_db)):
     5. AutoML Training with Cross-Validation
     6. Leaderboard & SHAP Explainability Diagnostics
     """
+    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     return AIAgent.run_auto_pilot_pipeline(
         db=db,
         dataset_id=request.dataset_id,

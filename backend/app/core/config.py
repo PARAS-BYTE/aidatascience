@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Upload Rules
     MAX_UPLOAD_SIZE: int = 104_857_600  # 100 MB
-    ALLOWED_EXTENSIONS: set = {"csv", "xlsx", "xls"}
+    ALLOWED_EXTENSIONS: set = {"csv", "xlsx", "xls", "parquet"}
 
     # ML Configuration
     DEFAULT_RANDOM_SEED: int = 42

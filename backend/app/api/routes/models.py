@@ -7,8 +7,9 @@ from typing import List, Optional
 from app.db.database import get_db, SessionLocal
 from app.db.models import (
     MLModel, Deployment, DeploymentStatus, ModelStatus,
-    ExperimentStatus, Job, JobStatus, JobType,
+    ExperimentStatus, Job, JobStatus, JobType, User,
 )
+from app.api.deps import get_current_user, get_optional_user
 from app.schemas.dataset import (
     ModelResponse, ModelListResponse, PredictionRequest, PredictionResponse,
     DeploymentRequest, DeploymentResponse, DeploymentListResponse,
@@ -28,37 +29,113 @@ router = APIRouter(tags=["Models"])
 # ─── Model Registry ─────────────────────────────────────────────────
 
 @router.post("/models/register", response_model=ModelResponse)
-def register_model(experiment_id: str, name: str = None, db: Session = Depends(get_db)):
-    """Register a completed experiment as a model."""
+def register_model(
+    experiment_id: str,
+    name: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Register a completed experiment owned by the user as a model."""
     try:
-        model = ModelService.register_model(db, experiment_id, name)
+        model = ModelService.register_model(db, experiment_id, name, user_id=current_user.id)
         return _model_to_response(model)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/models", response_model=ModelListResponse)
-def list_models(db: Session = Depends(get_db)):
-    """List all registered models."""
-    models = db.query(MLModel).order_by(MLModel.created_at.desc()).all()
+def list_models(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """List all registered models for the authenticated user only."""
+    if not current_user:
+        return ModelListResponse(total=0, items=[])
+    models = db.query(MLModel).filter(MLModel.user_id == current_user.id).order_by(MLModel.created_at.desc()).all()
     return ModelListResponse(
         total=len(models),
         items=[_model_to_response(m) for m in models],
     )
 
 
+@router.get("/dashboard")
+@router.get("/models/dashboard")
+def get_dashboard(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """Get dashboard statistics for the authenticated user."""
+    from app.db.models import Dataset, Experiment
+
+    if not current_user:
+        return {
+            "datasets": 0,
+            "experiments": 0,
+            "models": 0,
+            "deployed_models": 0,
+            "recent_datasets": [],
+            "recent_experiments": [],
+        }
+
+    uid = current_user.id
+    datasets = db.query(Dataset).filter(Dataset.user_id == uid).count()
+    experiments = db.query(Experiment).filter(
+        Experiment.user_id == uid,
+        Experiment.status == ExperimentStatus.COMPLETED
+    ).count()
+    models = db.query(MLModel).filter(MLModel.user_id == uid).count()
+    deployed = db.query(Deployment).join(MLModel).filter(
+        MLModel.user_id == uid,
+        Deployment.status == DeploymentStatus.ACTIVE
+    ).count()
+
+    recent_datasets = db.query(Dataset).filter(Dataset.user_id == uid).order_by(Dataset.created_at.desc()).limit(5).all()
+    recent_experiments = db.query(Experiment).filter(Experiment.user_id == uid).order_by(Experiment.created_at.desc()).limit(5).all()
+
+    return {
+        "datasets": datasets,
+        "experiments": experiments,
+        "models": models,
+        "deployed_models": deployed,
+        "recent_datasets": [
+            {"id": d.id, "name": d.original_filename, "created_at": d.created_at.isoformat()}
+            for d in recent_datasets
+        ],
+        "recent_experiments": [
+            {
+                "id": e.id, "name": e.name, "algorithm": e.algorithm,
+                "status": e.status.value, "created_at": e.created_at.isoformat(),
+                "metrics": json.loads(e.metrics) if e.metrics else None,
+            }
+            for e in recent_experiments
+        ],
+    }
+
+
 @router.get("/models/{model_id}", response_model=ModelResponse)
-def get_model(model_id: str, db: Session = Depends(get_db)):
-    """Get a specific model."""
-    model = db.query(MLModel).filter(MLModel.id == model_id).first()
+def get_model(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a specific model owned by the current user."""
+    model = db.query(MLModel).filter(MLModel.id == model_id, MLModel.user_id == current_user.id).first()
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
     return _model_to_response(model)
 
 
 @router.get("/models/{model_id}/card")
-def get_model_card(model_id: str, db: Session = Depends(get_db)):
-    """Retrieve or generate the standardized Markdown Model Card for this model."""
+def get_model_card(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve or generate the standardized Markdown Model Card for a model owned by current user."""
+    model = db.query(MLModel).filter(MLModel.id == model_id, MLModel.user_id == current_user.id).first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+
     from app.services.model_card_service import ModelCardService
     try:
         content_md = ModelCardService.get_card(model_id, db)
@@ -70,10 +147,15 @@ def get_model_card(model_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/models/{model_id}/status")
-def update_model_status(model_id: str, new_status: str, db: Session = Depends(get_db)):
-    """Update model status (promote, archive, etc.)."""
+def update_model_status(
+    model_id: str,
+    new_status: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update model status (promote, archive, etc.) for a model owned by current user."""
     try:
-        model = ModelService.update_model_status(db, model_id, new_status)
+        model = ModelService.update_model_status(db, model_id, new_status, user_id=current_user.id)
         return _model_to_response(model)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -82,10 +164,15 @@ def update_model_status(model_id: str, new_status: str, db: Session = Depends(ge
 # ─── Prediction ──────────────────────────────────────────────────────
 
 @router.post("/models/{model_id}/predict", response_model=PredictionResponse)
-def predict(model_id: str, request: PredictionRequest, db: Session = Depends(get_db)):
-    """Make a prediction using a registered model."""
+def predict(
+    model_id: str,
+    request: PredictionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Make a prediction using a registered model owned by current user."""
     try:
-        result = ModelService.predict(db, model_id, request.features)
+        result = ModelService.predict(db, model_id, request.features, user_id=current_user.id)
 
         # Log prediction for monitoring
         deployment = db.query(Deployment).filter(
@@ -101,7 +188,7 @@ def predict(model_id: str, request: PredictionRequest, db: Session = Depends(get
 
         return result
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Prediction failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prediction failed")
@@ -110,72 +197,108 @@ def predict(model_id: str, request: PredictionRequest, db: Session = Depends(get
 # ─── Explainability ──────────────────────────────────────────────────
 
 @router.get("/models/{model_id}/explainability", response_model=ExplainabilityResponse)
-def get_explainability(model_id: str, db: Session = Depends(get_db)):
-    """Get SHAP-based global feature importance for a model."""
+def get_explainability(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get SHAP-based global feature importance for a model owned by current user."""
     try:
-        result = ModelService.get_explainability(db, model_id)
+        result = ModelService.get_explainability(db, model_id, user_id=current_user.id)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Explainability failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Explainability computation failed")
 
 
 @router.post("/models/{model_id}/explain-prediction", response_model=PredictionExplanation)
-def explain_prediction(model_id: str, request: PredictionRequest, db: Session = Depends(get_db)):
-    """Explain a single prediction using SHAP values."""
+def explain_prediction(
+    model_id: str,
+    request: PredictionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Explain a single prediction using SHAP values for a model owned by current user."""
     try:
-        result = ModelService.explain_prediction(db, model_id, request.features)
+        result = ModelService.explain_prediction(db, model_id, request.features, user_id=current_user.id)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 # ─── Deployment ──────────────────────────────────────────────────────
 
 @router.post("/deployments", response_model=DeploymentResponse)
-def deploy_model(request: DeploymentRequest, db: Session = Depends(get_db)):
+def deploy_model(
+    request: DeploymentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Deploy a model for serving predictions (supports champion/challenger roles)."""
     try:
         deployment = ModelService.deploy_model(
             db, request.model_id,
             role=request.role or "champion",
-            traffic_pct=request.traffic_pct if request.traffic_pct is not None else 1.0
+            traffic_pct=request.traffic_pct if request.traffic_pct is not None else 1.0,
+            user_id=current_user.id,
         )
         return deployment
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/deployments/{deployment_id}/promote", response_model=DeploymentResponse)
-def promote_challenger_deployment(deployment_id: str, db: Session = Depends(get_db)):
+def promote_challenger_deployment(
+    deployment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Promote a challenger deployment to champion."""
+    deployment = db.query(Deployment).join(MLModel).filter(
+        Deployment.id == deployment_id,
+        MLModel.user_id == current_user.id,
+    ).first()
+    if not deployment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
+
     try:
-        deployment = ModelService.promote_challenger(db, deployment_id)
-        return deployment
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        return ModelService.promote_challenger(db, deployment_id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/deployments", response_model=DeploymentListResponse)
-def list_deployments(db: Session = Depends(get_db)):
-    """List all deployments."""
-    deployments = db.query(Deployment).order_by(Deployment.created_at.desc()).all()
+def list_deployments(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """List all deployments owned by the current user."""
+    if not current_user:
+        return DeploymentListResponse(total=0, items=[])
+    deployments = db.query(Deployment).join(MLModel).filter(
+        MLModel.user_id == current_user.id
+    ).order_by(Deployment.created_at.desc()).all()
     return DeploymentListResponse(total=len(deployments), items=deployments)
 
 
 @router.delete("/deployments/{deployment_id}")
-def stop_deployment(deployment_id: str, db: Session = Depends(get_db)):
+def stop_deployment(
+    deployment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Stop a deployment."""
-    deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()
+    deployment = db.query(Deployment).join(MLModel).filter(
+        Deployment.id == deployment_id,
+        MLModel.user_id == current_user.id,
+    ).first()
     if not deployment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
 
     deployment.status = DeploymentStatus.STOPPED
-    model = db.query(MLModel).filter(MLModel.id == deployment.model_id).first()
+    model = db.query(MLModel).filter(MLModel.id == deployment.model_id, MLModel.user_id == current_user.id).first()
     if model and model.status == ModelStatus.PRODUCTION:
         model.status = ModelStatus.VALIDATED
     db.commit()
@@ -186,8 +309,15 @@ def stop_deployment(deployment_id: str, db: Session = Depends(get_db)):
 # ─── Monitoring ──────────────────────────────────────────────────────
 
 @router.get("/monitoring/{model_id}", response_model=ModelHealthResponse)
-def get_model_health(model_id: str, db: Session = Depends(get_db)):
-    """Get model health including drift detection."""
+def get_model_health(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get model health including drift detection for a model owned by current user."""
+    model = db.query(MLModel).filter(MLModel.id == model_id, MLModel.user_id == current_user.id).first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
     try:
         return MonitoringService.get_model_health(db, model_id)
     except ValueError as e:
@@ -195,8 +325,15 @@ def get_model_health(model_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/monitoring/{model_id}/drift")
-def compute_drift(model_id: str, db: Session = Depends(get_db)):
-    """Trigger drift detection for a deployed model."""
+def compute_drift(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Trigger drift detection for a deployed model owned by current user."""
+    model = db.query(MLModel).filter(MLModel.id == model_id, MLModel.user_id == current_user.id).first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
     try:
         return MonitoringService.compute_drift(db, model_id)
     except ValueError as e:
@@ -231,16 +368,18 @@ def start_optimization(
     request: OptimizationRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Start hyperparameter optimization as a background job."""
+    """Start hyperparameter optimization as a background job for a model owned by current user."""
     from app.db.models import Experiment
-    experiment = db.query(Experiment).filter(Experiment.id == request.experiment_id).first()
+    experiment = db.query(Experiment).filter(Experiment.id == request.experiment_id, Experiment.user_id == current_user.id).first()
     if not experiment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
 
     job = Job(
         job_type=JobType.OPTIMIZATION,
         status=JobStatus.QUEUED,
+        user_id=current_user.id,
         dataset_id=experiment.dataset_id,
         experiment_id=request.experiment_id,
         progress_message="Queued for optimization",
@@ -341,6 +480,7 @@ def _run_optimization_background(job_id: str, request_data: dict):
 
         new_exp = Experiment(
             name=f"Optimized {request_data['algorithm']} ({opt_result['n_trials_completed']} trials)",
+            user_id=experiment.user_id,
             dataset_id=experiment.dataset_id,
             target_column=experiment.target_column,
             task_type=experiment.task_type,
@@ -369,8 +509,8 @@ def _run_optimization_background(job_id: str, request_data: dict):
             "experiment_id": new_exp.id,
             "metrics": eval_results.get("metrics", {}),
         })
-        JobService.complete_job(db, job_id, result_data=result_summary)
 
+        JobService.complete_job(db, job_id, result_data=result_summary)
     except Exception as e:
         logger.error(f"Optimization job {job_id} failed: {str(e)}", exc_info=True)
         JobService.fail_job(db, job_id, error_message=str(e))
@@ -384,41 +524,6 @@ def _update_job_progress(db: Session, job_id: str, progress: float, message: str
         job.progress = progress
         job.progress_message = message
         db.commit()
-
-
-# ─── Dashboard ───────────────────────────────────────────────────────
-
-@router.get("/dashboard")
-def get_dashboard(db: Session = Depends(get_db)):
-    """Get dashboard statistics from real data."""
-    from app.db.models import Dataset, Experiment
-
-    datasets = db.query(Dataset).count()
-    experiments = db.query(Experiment).filter(Experiment.status == ExperimentStatus.COMPLETED).count()
-    models = db.query(MLModel).count()
-    deployed = db.query(Deployment).filter(Deployment.status == DeploymentStatus.ACTIVE).count()
-
-    recent_datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).limit(5).all()
-    recent_experiments = db.query(Experiment).order_by(Experiment.created_at.desc()).limit(5).all()
-
-    return {
-        "datasets": datasets,
-        "experiments": experiments,
-        "models": models,
-        "deployed_models": deployed,
-        "recent_datasets": [
-            {"id": d.id, "name": d.original_filename, "created_at": d.created_at.isoformat()}
-            for d in recent_datasets
-        ],
-        "recent_experiments": [
-            {
-                "id": e.id, "name": e.name, "algorithm": e.algorithm,
-                "status": e.status.value, "created_at": e.created_at.isoformat(),
-                "metrics": json.loads(e.metrics) if e.metrics else None,
-            }
-            for e in recent_experiments
-        ],
-    }
 
 
 def _model_to_response(model: MLModel) -> ModelResponse:

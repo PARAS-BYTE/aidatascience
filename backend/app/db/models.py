@@ -91,6 +91,7 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
+    projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     datasets = relationship("Dataset", back_populates="user", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
     experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
@@ -111,11 +112,30 @@ class UserActivity(Base):
     user = relationship("User", back_populates="activities")
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default="active", nullable=False)  # active, archived
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="projects")
+    datasets = relationship("Dataset", back_populates="project", cascade="all, delete-orphan")
+    experiments = relationship("Experiment", back_populates="project")
+    models = relationship("MLModel", back_populates="project")
+
+
 class Dataset(Base):
     __tablename__ = "datasets"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     original_filename = Column(String(255), nullable=False)
     stored_filename = Column(String(255), nullable=False, unique=True)
     file_path = Column(String(512), nullable=False)
@@ -136,6 +156,9 @@ class Dataset(Base):
 
     # Relationships
     user = relationship("User", back_populates="datasets")
+    project = relationship("Project", back_populates="datasets")
+    versions = relationship("DatasetVersion", back_populates="dataset", cascade="all, delete-orphan", order_by="DatasetVersion.version")
+    quality_reports = relationship("DataQualityReport", back_populates="dataset", cascade="all, delete-orphan", order_by="DataQualityReport.created_at.desc()")
     experiments = relationship("Experiment", back_populates="dataset", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="dataset", cascade="all, delete-orphan")
 
@@ -168,11 +191,49 @@ class Job(Base):
     model = relationship("MLModel", back_populates="jobs")
 
 
+class DatasetVersion(Base):
+    __tablename__ = "dataset_versions"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    file_path = Column(String(512), nullable=False)
+    file_size = Column(BigInteger, nullable=False)
+    row_count = Column(Integer, nullable=True)
+    column_count = Column(Integer, nullable=True)
+    change_summary = Column(Text, nullable=True)  # "Cleaned 231 duplicates, imputed 4 columns"
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    # Relationships
+    dataset = relationship("Dataset", back_populates="versions")
+
+
+class DataQualityReport(Base):
+    __tablename__ = "data_quality_reports"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    overall_score = Column(Float, nullable=False)  # 0.0 to 100.0
+    completeness_score = Column(Float, nullable=False)
+    validity_score = Column(Float, nullable=False)
+    uniqueness_score = Column(Float, nullable=False)
+    consistency_score = Column(Float, nullable=False)
+    leakage_score = Column(Float, nullable=False, default=100.0)
+    summary = Column(Text, nullable=True)  # JSON summary
+    details = Column(Text, nullable=False)  # Full JSON details
+    recommendations = Column(Text, nullable=True)  # JSON list of remediation actions
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    # Relationships
+    dataset = relationship("Dataset", back_populates="quality_reports")
+
+
 class Experiment(Base):
     __tablename__ = "experiments"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False)
     target_column = Column(String(255), nullable=False)
@@ -196,6 +257,7 @@ class Experiment(Base):
 
     # Relationships
     user = relationship("User", back_populates="experiments")
+    project = relationship("Project", back_populates="experiments")
     dataset = relationship("Dataset", back_populates="experiments")
     jobs = relationship("Job", back_populates="experiment")
     models = relationship("MLModel", back_populates="experiment", cascade="all, delete-orphan")
@@ -206,6 +268,7 @@ class MLModel(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     version = Column(Integer, default=1, nullable=False)
     experiment_id = Column(String(36), ForeignKey("experiments.id"), nullable=False)
@@ -225,6 +288,7 @@ class MLModel(Base):
 
     # Relationships
     user = relationship("User", back_populates="models")
+    project = relationship("Project", back_populates="models")
     experiment = relationship("Experiment", back_populates="models")
     deployments = relationship("Deployment", back_populates="model", cascade="all, delete-orphan")
     monitoring_records = relationship("MonitoringRecord", back_populates="model", cascade="all, delete-orphan")

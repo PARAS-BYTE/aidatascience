@@ -1,0 +1,8 @@
+{
+  "numerical_columns": [
+    "Weight"
+  ],
+  "categorical_columns": [],
+  "has_label_encoder": true,
+  "label_encoder_path": "./models/saved\\fb33a61c-ce76-4934-be61-3db5e159db0a_random_forest_1788629056\\preprocessing_label_encoder.joblib"
+}

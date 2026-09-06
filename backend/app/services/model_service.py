@@ -26,9 +26,12 @@ class ModelService:
     """Manages model registry, prediction, and deployment."""
 
     @staticmethod
-    def register_model(db: Session, experiment_id: str, name: Optional[str] = None) -> MLModel:
+    def register_model(db: Session, experiment_id: str, name: Optional[str] = None, user_id: Optional[str] = None) -> MLModel:
         """Register a trained experiment as a model in the registry."""
-        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        exp_query = db.query(Experiment).filter(Experiment.id == experiment_id)
+        if user_id:
+            exp_query = exp_query.filter(Experiment.user_id == user_id)
+        experiment = exp_query.first()
         if not experiment:
             raise ValueError(f"Experiment {experiment_id} not found")
         if experiment.status != ExperimentStatus.COMPLETED:
@@ -47,10 +50,12 @@ class ModelService:
         ).count()
         version = existing_models + 1
 
+        effective_user_id = user_id or experiment.user_id
+
         ml_model = MLModel(
             name=model_name,
             version=version,
-            user_id=experiment.user_id,
+            user_id=effective_user_id,
             experiment_id=experiment_id,
             dataset_id=experiment.dataset_id,
             task_type=experiment.task_type,
@@ -71,7 +76,7 @@ class ModelService:
         from app.services.auth_service import AuthService
         AuthService.log_activity(
             db=db,
-            user_id=experiment.user_id,
+            user_id=effective_user_id,
             action="REGISTER_MODEL",
             title=f"Registered model {ml_model.name} (v{version})",
             details=f"Algorithm: {ml_model.algorithm}, Target: {ml_model.target_column}",
@@ -79,7 +84,7 @@ class ModelService:
 
         # Auto-compute SHAP on registration & save Parquet (B3)
         try:
-            ModelService.get_explainability(db, ml_model.id)
+            ModelService.get_explainability(db, ml_model.id, user_id=effective_user_id)
         except Exception as shap_err:
             logger.warning(f"SHAP auto-computation skipped during registration: {shap_err}")
 
@@ -87,9 +92,12 @@ class ModelService:
         return ml_model
 
     @staticmethod
-    def predict(db: Session, model_id: str, features: Dict[str, Any]) -> Dict[str, Any]:
+    def predict(db: Session, model_id: str, features: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
         """Make a prediction using a registered model."""
-        model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+        query = db.query(MLModel).filter(MLModel.id == model_id)
+        if user_id:
+            query = query.filter(MLModel.user_id == user_id)
+        model_record = query.first()
         if not model_record:
             raise ValueError(f"Model {model_id} not found")
 
@@ -149,9 +157,12 @@ class ModelService:
         }
 
     @staticmethod
-    def get_explainability(db: Session, model_id: str) -> Dict[str, Any]:
+    def get_explainability(db: Session, model_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Compute SHAP-based feature importance for a model."""
-        model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+        query = db.query(MLModel).filter(MLModel.id == model_id)
+        if user_id:
+            query = query.filter(MLModel.user_id == user_id)
+        model_record = query.first()
         if not model_record:
             raise ValueError(f"Model {model_id} not found")
 
@@ -220,10 +231,13 @@ class ModelService:
 
     @staticmethod
     def explain_prediction(
-        db: Session, model_id: str, features: Dict[str, Any]
+        db: Session, model_id: str, features: Dict[str, Any], user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Explain a single prediction using SHAP."""
-        model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+        query = db.query(MLModel).filter(MLModel.id == model_id)
+        if user_id:
+            query = query.filter(MLModel.user_id == user_id)
+        model_record = query.first()
         if not model_record:
             raise ValueError(f"Model {model_id} not found")
 
@@ -263,9 +277,12 @@ class ModelService:
         return result
 
     @staticmethod
-    def deploy_model(db: Session, model_id: str, role: str = "champion", traffic_pct: float = 1.0) -> Deployment:
+    def deploy_model(db: Session, model_id: str, role: str = "champion", traffic_pct: float = 1.0, user_id: Optional[str] = None) -> Deployment:
         """Deploy a model with champion/challenger role and traffic allocation."""
-        model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+        query = db.query(MLModel).filter(MLModel.id == model_id)
+        if user_id:
+            query = query.filter(MLModel.user_id == user_id)
+        model_record = query.first()
         if not model_record:
             raise ValueError(f"Model {model_id} not found")
 
@@ -337,9 +354,12 @@ class ModelService:
         return deployment
 
     @staticmethod
-    def update_model_status(db: Session, model_id: str, status: str) -> MLModel:
+    def update_model_status(db: Session, model_id: str, status: str, user_id: Optional[str] = None) -> MLModel:
         """Update model status (promote, archive, etc.)."""
-        model_record = db.query(MLModel).filter(MLModel.id == model_id).first()
+        query = db.query(MLModel).filter(MLModel.id == model_id)
+        if user_id:
+            query = query.filter(MLModel.user_id == user_id)
+        model_record = query.first()
         if not model_record:
             raise ValueError(f"Model {model_id} not found")
 

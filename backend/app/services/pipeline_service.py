@@ -122,6 +122,20 @@ class PipelineService:
             dataset.cleaned_file_path = cleaned_path
 
         df.to_csv(cleaned_path, index=False)
+        final_rows, final_cols = df.shape
+
+        dataset.version = (dataset.version or 1) + 1
+        from app.db.models import DatasetVersion
+        new_version = DatasetVersion(
+            dataset_id=dataset.id,
+            version=dataset.version,
+            file_path=cleaned_path,
+            file_size=os.path.getsize(cleaned_path) if os.path.exists(cleaned_path) else 0,
+            row_count=final_rows,
+            column_count=final_cols,
+            change_summary=f"Pipeline replay: applied {len([s for s in executed_steps if s.get('status') == 'success'])} step(s)",
+        )
+        db.add(new_version)
         db.commit()
 
         final_rows, final_cols = df.shape

@@ -31,6 +31,7 @@ def upgrade_sqlite_schema() -> None:
         "datasets": {
             "validation_schema": "TEXT",
             "user_id": "VARCHAR(36)",
+            "project_id": "VARCHAR(36)",
         },
         "jobs": {
             "budget_seconds": "INTEGER",
@@ -40,9 +41,11 @@ def upgrade_sqlite_schema() -> None:
         },
         "experiments": {
             "user_id": "VARCHAR(36)",
+            "project_id": "VARCHAR(36)",
         },
         "ml_models": {
             "user_id": "VARCHAR(36)",
+            "project_id": "VARCHAR(36)",
         },
         "deployments": {
             "role": "VARCHAR(20) DEFAULT 'champion'",

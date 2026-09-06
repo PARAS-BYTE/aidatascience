@@ -9,6 +9,8 @@ export interface Dataset {
   upload_status: UploadStatus;
   target_column?: string | null;
   task_type?: string | null;
+  version?: number;
+  project_id?: string | null;
   created_at: string;
   updated_at: string;
 }

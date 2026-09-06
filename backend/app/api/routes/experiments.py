@@ -3,7 +3,7 @@ import asyncio
 import json
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
 
 from app.db.database import get_db, SessionLocal
@@ -18,6 +18,9 @@ from app.core.logging import logger
 
 router = APIRouter(prefix="/experiments", tags=["Experiments"])
 
+
+from app.api.deps import get_current_user, get_optional_user
+from app.db.models import User
 
 def _run_training_background(job_id: str, request_data: dict):
     """Background task for model training."""
@@ -35,6 +38,7 @@ def _run_training_background(job_id: str, request_data: dict):
             enable_feature_engineering=request_data.get("enable_feature_engineering", True),
             job_id=job_id,
             budget_seconds=request_data.get("budget_seconds"),
+            user_id=request_data.get("user_id"),
         )
         # Store result summary
         result_summary = {
@@ -68,16 +72,18 @@ def start_training(
     request: TrainingRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Start model training as a background job."""
+    """Start model training as a background job for the authenticated user."""
     from app.db.models import Dataset
-    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
     job = Job(
         job_type=JobType.TRAINING,
         status=JobStatus.QUEUED,
+        user_id=current_user.id,
         dataset_id=request.dataset_id,
         progress_message="Queued for training",
     )
@@ -85,19 +91,29 @@ def start_training(
     db.commit()
     db.refresh(job)
 
+    req_dict = request.model_dump()
+    req_dict["user_id"] = current_user.id
+
     background_tasks.add_task(
         _run_training_background,
         job.id,
-        request.model_dump(),
+        req_dict,
     )
 
     return job
 
 
 @router.get("", response_model=List[ExperimentResponse])
-def list_experiments(dataset_id: str = None, db: Session = Depends(get_db)):
-    """List all experiments, optionally filtered by dataset."""
-    query = db.query(Experiment).order_by(Experiment.created_at.desc())
+def list_experiments(
+    dataset_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
+):
+    """List experiments belonging to the current user."""
+    if not current_user:
+        return []
+
+    query = db.query(Experiment).filter(Experiment.user_id == current_user.id).order_by(Experiment.created_at.desc())
     if dataset_id:
         query = query.filter(Experiment.dataset_id == dataset_id)
 
@@ -124,9 +140,13 @@ def list_experiments(dataset_id: str = None, db: Session = Depends(get_db)):
 
 
 @router.get("/leaderboard/{dataset_id}", response_model=LeaderboardResponse)
-def get_leaderboard(dataset_id: str, db: Session = Depends(get_db)):
-    """Get model leaderboard for a dataset."""
-    result = ExperimentService.get_leaderboard(db, dataset_id)
+def get_leaderboard(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get model leaderboard for a dataset owned by the current user."""
+    result = ExperimentService.get_leaderboard(db, dataset_id, user_id=current_user.id)
     if not result["entries"]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -136,9 +156,13 @@ def get_leaderboard(dataset_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{experiment_id}", response_model=ExperimentResponse)
-def get_experiment(experiment_id: str, db: Session = Depends(get_db)):
-    """Get details of a specific experiment."""
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+def get_experiment(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get details of a specific experiment owned by the current user."""
+    exp = db.query(Experiment).filter(Experiment.id == experiment_id, Experiment.user_id == current_user.id).first()
     if not exp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
 
@@ -167,8 +191,16 @@ from app.services.export_service import ExportService
 
 
 @router.get("/{experiment_id}/export")
-def export_experiment(experiment_id: str, format: str = "notebook", db: Session = Depends(get_db)):
+def export_experiment(
+    experiment_id: str,
+    format: str = "notebook",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Export experiment pipeline as an executable Python script (.py) or Jupyter Notebook (.ipynb)."""
+    exp = db.query(Experiment).filter(Experiment.id == experiment_id, Experiment.user_id == current_user.id).first()
+    if not exp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found")
     try:
         if format.lower() == "script":
             code = ExportService.generate_script(experiment_id, db)

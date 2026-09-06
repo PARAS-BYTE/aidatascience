@@ -16,11 +16,15 @@ class ForecastingService:
     def run_forecast(
         db: Session,
         dataset_id: str,
+        user_id: Optional[str] = None,
         date_column: Optional[str] = None,
         value_column: Optional[str] = None,
         horizon: int = 14,
     ) -> Dict[str, Any]:
-        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        query = db.query(Dataset).filter(Dataset.id == dataset_id)
+        if user_id:
+            query = query.filter(Dataset.user_id == user_id)
+        dataset = query.first()
         if not dataset:
             raise ValueError(f"Dataset with ID '{dataset_id}' not found.")
 

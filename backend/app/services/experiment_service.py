@@ -41,6 +41,7 @@ class ExperimentService:
         enable_feature_engineering: bool = True,
         job_id: Optional[str] = None,
         budget_seconds: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute the full training pipeline:
@@ -66,7 +67,10 @@ class ExperimentService:
             update_job(5, "Loading dataset...")
 
             # 1. Load dataset
-            dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+            dataset_query = db.query(Dataset).filter(Dataset.id == dataset_id)
+            if user_id:
+                dataset_query = dataset_query.filter(Dataset.user_id == user_id)
+            dataset = dataset_query.first()
             if not dataset:
                 raise ValueError(f"Dataset {dataset_id} not found")
 
@@ -215,7 +219,7 @@ class ExperimentService:
                 # Create experiment record
                 experiment = Experiment(
                     name=f"{entry['display_name']} on {dataset.original_filename}",
-                    user_id=dataset.user_id,
+                    user_id=user_id or dataset.user_id,
                     dataset_id=dataset_id,
                     target_column=target,
                     task_type=TaskType(task_type),
@@ -254,7 +258,10 @@ class ExperimentService:
                 })
 
             db.commit()
-            update_job(100, "Training complete.")
+
+            # Generate leaderboard
+            leaderboard = ExperimentService.get_leaderboard(db, dataset_id, user_id=user_id or dataset.user_id)
+            update_job(100, "Training complete!")
 
             return {
                 "dataset_id": dataset_id,
@@ -262,7 +269,7 @@ class ExperimentService:
                 "task_type": task_type,
                 "primary_metric": primary_metric,
                 "experiments": experiments,
-                "leaderboard": training_results["leaderboard"],
+                "leaderboard": leaderboard["entries"],
                 "elimination_log": training_results.get("elimination_log", []),
                 "survival_funnel": training_results.get("survival_funnel", []),
                 "budget_seconds": budget_seconds,
@@ -275,12 +282,15 @@ class ExperimentService:
             raise
 
     @staticmethod
-    def get_leaderboard(db: Session, dataset_id: str) -> Dict[str, Any]:
+    def get_leaderboard(db: Session, dataset_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Get the model leaderboard for a dataset."""
-        experiments = db.query(Experiment).filter(
+        query = db.query(Experiment).filter(
             Experiment.dataset_id == dataset_id,
             Experiment.status == ExperimentStatus.COMPLETED,
-        ).all()
+        )
+        if user_id:
+            query = query.filter(Experiment.user_id == user_id)
+        experiments = query.all()
 
         if not experiments:
             return {"entries": [], "primary_metric": None, "task_type": None}

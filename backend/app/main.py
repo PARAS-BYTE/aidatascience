@@ -105,6 +105,25 @@ def create_application() -> FastAPI:
     app.include_router(api_router, prefix=settings.API_PREFIX)
     app.include_router(api_router, prefix="/api")
 
+    # Serve production React frontend if built (dist directory exists)
+    dist_dir = os.path.join(PROJECT_ROOT, "frontend", "dist")
+    if os.path.isdir(dist_dir):
+        from fastapi.staticfiles import StaticFiles
+        from fastapi.responses import FileResponse
+
+        assets_dir = os.path.join(dist_dir, "assets")
+        if os.path.isdir(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="static-assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str):
+            if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path.startswith("openapi.json"):
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+            file_path = os.path.join(dist_dir, full_path)
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
+            return FileResponse(os.path.join(dist_dir, "index.html"))
+
     return app
 
 

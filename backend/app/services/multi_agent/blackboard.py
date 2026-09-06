@@ -83,7 +83,10 @@ class SharedBlackboard:
 
     def set(self, key: str, value: Any, agent_name: Optional[str] = None) -> None:
         """Store a sanitized value on the blackboard with optional agent attribution."""
-        clean_value = sanitize_for_json(value)
+        if isinstance(value, (pd.DataFrame, np.ndarray)):
+            clean_value = value
+        else:
+            clean_value = sanitize_for_json(value)
         self._store[key] = {
             "value": clean_value,
             "agent": agent_name,

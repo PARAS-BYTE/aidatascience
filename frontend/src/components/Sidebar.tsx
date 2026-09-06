@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Database, BarChart3, Eraser, Sparkles, FlaskConical,
+  LayoutDashboard, FolderKanban, Database, BarChart3, ShieldCheck, Eraser, Sparkles, FlaskConical,
   Box, Brain, MessageSquare, Rocket, Activity, Settings, Cpu,
-  ListChecks, ChevronLeft, ChevronRight, Zap, TrendingUp, HelpCircle, User
+  ListChecks, ChevronLeft, ChevronRight, Zap, TrendingUp, User, Network
 } from 'lucide-react';
 
 const navSections = [
@@ -11,6 +11,7 @@ const navSections = [
     label: 'Overview',
     items: [
       { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+      { name: 'Projects', path: '/projects', icon: FolderKanban },
       { name: 'My Profile', path: '/profile', icon: User },
       { name: 'Datasets', path: '/datasets', icon: Database },
     ],
@@ -19,7 +20,7 @@ const navSections = [
     label: 'Analysis',
     items: [
       { name: 'EDA', path: '/eda', icon: BarChart3 },
-      { name: 'Ask Data', path: '/ask-data', icon: HelpCircle },
+      { name: 'Data Quality', path: '/data-quality', icon: ShieldCheck },
       { name: 'Cleaning', path: '/cleaning', icon: Eraser },
       { name: 'Feature Studio', path: '/feature-engineering', icon: Sparkles },
     ],
@@ -29,6 +30,7 @@ const navSections = [
     items: [
       { name: 'Experiments', path: '/experiments', icon: FlaskConical },
       { name: 'Models', path: '/models', icon: Box },
+      { name: 'Unsupervised', path: '/unsupervised', icon: Network },
       { name: 'Forecasting', path: '/forecasting', icon: TrendingUp },
       { name: 'Explainability', path: '/explainability', icon: Brain },
     ],

@@ -14,11 +14,13 @@ class JobService:
         dataset_id: Optional[str] = None,
         experiment_id: Optional[str] = None,
         model_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Job:
         """Creates a new job with QUEUED status."""
         job = Job(
             job_type=job_type,
             status=JobStatus.QUEUED,
+            user_id=user_id,
             dataset_id=dataset_id,
             experiment_id=experiment_id,
             model_id=model_id,
@@ -85,11 +87,17 @@ class JobService:
         return job
 
     @staticmethod
-    def get_all(db: Session) -> List[Job]:
-        """Gets all jobs ordered by created_at descending."""
-        return db.query(Job).order_by(Job.created_at.desc()).all()
+    def get_all(db: Session, user_id: Optional[str] = None) -> List[Job]:
+        """Gets all jobs for user ordered by created_at descending."""
+        query = db.query(Job)
+        if user_id:
+            query = query.filter(Job.user_id == user_id)
+        return query.order_by(Job.created_at.desc()).all()
 
     @staticmethod
-    def get_by_id(db: Session, job_id: str) -> Optional[Job]:
-        """Finds a job by ID."""
-        return db.query(Job).filter(Job.id == job_id).first()
+    def get_by_id(db: Session, job_id: str, user_id: Optional[str] = None) -> Optional[Job]:
+        """Finds a job by ID, optionally enforcing user ownership."""
+        query = db.query(Job).filter(Job.id == job_id)
+        if user_id:
+            query = query.filter(Job.user_id == user_id)
+        return query.first()

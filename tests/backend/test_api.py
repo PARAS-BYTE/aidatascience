@@ -246,3 +246,48 @@ def test_auto_pilot_pipeline():
         client.delete(f"/api/v1/datasets/{dataset_id}")
 
 
+def test_unified_agent_ask_data_and_general_chat():
+    """Test unified agent handling general data science dialogue and DuckDB CSV querying."""
+    # 1. General conversation WITHOUT dataset
+    gen_resp = client.post("/api/v1/agent/chat", json={
+        "message": "How do I handle imbalanced datasets?",
+    })
+    assert gen_resp.status_code == 200
+    gen_data = gen_resp.json()
+    assert "Imbalanced Datasets" in gen_data["response"] or "PR-AUC" in gen_data["response"] or "SMOTE" in gen_data["response"]
+
+    # 2. Upload CSV and query data with DuckDB Text-to-SQL
+    csv_bytes = b"dept,salary,experience\nSales,50000,3\nEngineering,95000,5\nSales,55000,4\nEngineering,110000,8\n"
+    up_resp = client.post(
+        "/api/v1/datasets/upload",
+        files={"file": ("salaries.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+    assert up_resp.status_code == 201
+    dataset_id = up_resp.json()["id"]
+
+    try:
+        # Ask DuckDB query
+        query_resp = client.post("/api/v1/agent/chat", json={
+            "message": "What is the average of numeric columns?",
+            "dataset_id": dataset_id,
+        })
+        assert query_resp.status_code == 200
+        q_data = query_resp.json()
+        assert len(q_data["charts"]) > 0
+        assert q_data["charts"][0]["config"]["is_sql_query"] is True
+        assert len(q_data["charts"][0]["data"]) > 0
+
+        # Ask another data question (top rows)
+        top_resp = client.post("/api/v1/agent/chat", json={
+            "message": "Show the top 2 rows",
+            "dataset_id": dataset_id,
+        })
+        assert top_resp.status_code == 200
+        top_data = top_resp.json()
+        assert len(top_data["charts"]) > 0
+        assert top_data["charts"][0]["config"]["is_sql_query"] is True
+    finally:
+        client.delete(f"/api/v1/datasets/{dataset_id}")
+
+
+

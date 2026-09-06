@@ -9,7 +9,8 @@ import os
 import uuid
 
 from app.db.database import get_db
-from app.db.models import Dataset
+from app.db.models import Dataset, User
+from app.api.deps import get_current_user
 from app.schemas.dataset import (
     FeatureEngineeringPreviewRequest,
     FeatureEngineeringPreviewResponse,
@@ -30,12 +31,13 @@ def preview_feature_engineering(
     dataset_id: str,
     request: FeatureEngineeringPreviewRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Generate an interactive preview of engineered features, including PCA,
     polynomial terms, interaction products, and temporal decompositions.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -98,11 +100,12 @@ def apply_feature_engineering(
     dataset_id: str,
     request: FeatureEngineeringPreviewRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Execute feature engineering and persist transformed dataset to disk for model training.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -176,12 +179,13 @@ def auto_generate_features(
     dataset_id: str,
     target: str = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Auto-generate candidate features (interactions, ratios, temporal, non-linear)
     with estimated impact scores and mathematical formulas.
     """
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

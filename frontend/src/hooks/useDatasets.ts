@@ -1,13 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Dataset } from '../types/dataset';
 import { apiService } from '../services/api';
+import { useAuthStore } from '../store/authStore';
 
 export function useDatasets() {
+  const user = useAuthStore((s) => s.user);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDatasets = useCallback(async () => {
+    if (!user) {
+      setDatasets([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -19,7 +26,7 @@ export function useDatasets() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchDatasets();

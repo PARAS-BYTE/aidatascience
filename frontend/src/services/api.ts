@@ -237,4 +237,101 @@ export const apiService = {
   getJob: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
   triggerTestJob: (shouldFail: boolean = false) =>
     api.post(`/jobs/test?should_fail=${shouldFail}`).then(r => r.data),
+
+  // ─── Projects ───────────────────────────────────────────────────────
+  getProjects: (statusFilter?: string) =>
+    api.get(`/projects${statusFilter ? `?status_filter=${statusFilter}` : ''}`).then(r => r.data),
+  getProject: (id: string) => api.get(`/projects/${id}`).then(r => r.data),
+  createProject: (data: { name: string; description?: string }) =>
+    api.post('/projects', data).then(r => r.data),
+  updateProject: (id: string, data: { name?: string; description?: string; status?: string }) =>
+    api.put(`/projects/${id}`, data).then(r => r.data),
+  deleteProject: (id: string) => api.delete(`/projects/${id}`).then(r => r.data),
+  getProjectActivity: (id: string, limit: number = 50) =>
+    api.get(`/projects/${id}/activity?limit=${limit}`).then(r => r.data),
+  getProjectDatasets: (id: string) => api.get(`/projects/${id}/datasets`).then(r => r.data),
+  getProjectExperiments: (id: string) => api.get(`/projects/${id}/experiments`).then(r => r.data),
+  getProjectModels: (id: string) => api.get(`/projects/${id}/models`).then(r => r.data),
+
+  // ─── Dataset Versions & Project Upload ──────────────────────────────
+  getDatasetVersions: (id: string) => api.get(`/datasets/${id}/versions`).then(r => r.data),
+  uploadDatasetToProject: (file: File, projectId?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post(`/datasets/upload${projectId ? `?project_id=${projectId}` : ''}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data);
+  },
+
+  // ─── Data Quality Engine v2 ─────────────────────────────────────────
+  getDataQuality: (datasetId: string, targetColumn?: string) =>
+    api.get(`/datasets/${datasetId}/data-quality${targetColumn ? `?target_column=${targetColumn}` : ''}`).then(r => r.data),
+  assessDataQuality: (datasetId: string, targetColumn?: string) =>
+    api.post(`/datasets/${datasetId}/data-quality/assess`, { target_column: targetColumn }).then(r => r.data),
+  remediateDataQuality: (
+    datasetId: string,
+    actions: {
+      drop_columns?: string[];
+      remove_duplicates?: boolean;
+      impute_missing?: boolean;
+      standardize_fuzzy?: boolean;
+    }
+  ) =>
+    api.post(`/datasets/${datasetId}/data-quality/remediate`, actions).then(r => r.data),
+
+  // ─── Statistical Analysis & Advanced EDA ─────────────────────────────
+  getStatisticalTests: (datasetId: string, target?: string, columnA?: string, columnB?: string) => {
+    const params = new URLSearchParams();
+    if (target) params.set('target', target);
+    if (columnA) params.set('column_a', columnA);
+    if (columnB) params.set('column_b', columnB);
+    return api.get(`/datasets/${datasetId}/statistical-tests?${params.toString()}`).then(r => r.data);
+  },
+  getChartRecommendation: (datasetId: string, columnA: string, columnB?: string) => {
+    const params = new URLSearchParams();
+    params.set('column_a', columnA);
+    if (columnB) params.set('column_b', columnB);
+    return api.get(`/datasets/${datasetId}/chart-recommendation?${params.toString()}`).then(r => r.data);
+  },
+  getAutoEdaReport: (datasetId: string, target?: string) =>
+    api.get(`/datasets/${datasetId}/auto-eda-report${target ? `?target=${target}` : ''}`).then(r => r.data),
+
+  // ─── Unsupervised Learning Suite ─────────────────────────────────────
+  runClustering: (
+    datasetId: string,
+    options: {
+      features?: string[];
+      algorithm?: string;
+      n_clusters?: number;
+      auto_k?: boolean;
+      k_min?: number;
+      k_max?: number;
+    } = {}
+  ) => api.post(`/datasets/${datasetId}/unsupervised/cluster`, options).then(r => r.data),
+
+  runAnomalyDetection: (
+    datasetId: string,
+    options: {
+      features?: string[];
+      algorithm?: string;
+      contamination?: number;
+    } = {}
+  ) => api.post(`/datasets/${datasetId}/unsupervised/anomalies`, options).then(r => r.data),
+
+  runPca: (
+    datasetId: string,
+    options: {
+      features?: string[];
+      n_components?: number;
+    } = {}
+  ) => api.post(`/datasets/${datasetId}/unsupervised/pca`, options).then(r => r.data),
+
+  appendUnsupervisedColumn: (
+    datasetId: string,
+    options: {
+      column_name: string;
+      values: any[];
+      change_summary?: string;
+    }
+  ) => api.post(`/datasets/${datasetId}/unsupervised/append-labels`, options).then(r => r.data),
 };

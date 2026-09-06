@@ -1,4 +1,16 @@
+---
+title: AI Data Science & AutoML Platform
+emoji: 🚀
+colorFrom: indigo
+colorTo: blue
+sdk: gradio
+sdk_version: 4.44.0
+app_file: server.py
+pinned: false
+---
+
 # AI-Powered Data Science Platform (Phase 0 Foundation)
+
 
 Welcome to Phase 0 of the **AI-Powered Data Science Platform**. This project establishes a modular, production-oriented foundation designed for future scaling into an autonomous data science assistant.
 

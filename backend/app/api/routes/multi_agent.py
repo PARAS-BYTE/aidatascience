@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.db.models import User, Dataset
+from app.api.deps import get_current_user
 from app.services.multi_agent.orchestrator import MultiAgentOrchestrator
 from app.services.multi_agent.blackboard import get_blackboard, clear_blackboard, sanitize_for_json
 from app.services.multi_agent.agents.analysis_agents import WhyInvestigationAgent
@@ -43,10 +45,15 @@ class DashboardPatchRequest(BaseModel):
 async def run_multi_agent_chat(
     request: MultiAgentChatRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
     Execute the multi-agent parallel pipeline synchronously and return full blackboard & report.
     """
+    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     try:
         result = await MultiAgentOrchestrator.run_pipeline(
             db=db,
@@ -70,11 +77,16 @@ async def stream_multi_agent_events(
     prompt: str = Query(""),
     target: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Server-Sent Events (SSE) live stream yielding DAG execution events,
     agent progress, and incremental dashboard cards.
     """
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     async def event_generator():
         try:
             async for event in MultiAgentOrchestrator.stream_pipeline(
@@ -105,10 +117,15 @@ async def stream_multi_agent_events(
 async def run_why_investigation(
     request: WhyInvestigationRequest,
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+    current_user: User = Depends(get_current_user),
+):
     """
     Direct parallel root-cause dimension decomposition.
     """
+    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     blackboard = get_blackboard(session_id=request.session_id, dataset_id=request.dataset_id)
     MultiAgentOrchestrator.load_dataset_to_blackboard(db=db, dataset_id=request.dataset_id, blackboard=blackboard)
     
@@ -128,10 +145,15 @@ async def run_why_investigation(
 async def patch_dashboard_spec(
     request: DashboardPatchRequest,
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+    current_user: User = Depends(get_current_user),
+):
     """
     Incrementally modify and patch the active dashboard spec with natural language.
     """
+    dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     blackboard = get_blackboard(session_id=request.session_id, dataset_id=request.dataset_id)
     MultiAgentOrchestrator.load_dataset_to_blackboard(db=db, dataset_id=request.dataset_id, blackboard=blackboard)
     

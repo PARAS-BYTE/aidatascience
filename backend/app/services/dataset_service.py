@@ -39,7 +39,12 @@ class DatasetService:
         return ext
 
     @staticmethod
-    async def save_dataset(db: Session, file: UploadFile, user_id: Optional[str] = None) -> Dataset:
+    async def save_dataset(
+        db: Session,
+        file: UploadFile,
+        user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> Dataset:
         """Saves uploaded file to disk and records metadata in database."""
         ext = DatasetService.validate_file(file)
 
@@ -84,17 +89,41 @@ class DatasetService:
         dataset = Dataset(
             id=unique_id,
             user_id=user_id,
+            project_id=project_id,
             original_filename=sanitize_filename(file.filename),
             stored_filename=stored_filename,
             file_path=target_path,
             file_size=file_size,
             file_type=ext.upper(),
             upload_status=UploadStatus.SUCCESS,
+            version=1,
         )
 
         db.add(dataset)
         db.commit()
         db.refresh(dataset)
+
+        # Record initial version in dataset_versions
+        row_count, col_count = None, None
+        try:
+            from app.services.profiler import DatasetProfiler
+            df = DatasetProfiler.load_dataset(target_path)
+            row_count, col_count = df.shape
+        except Exception as e:
+            logger.warning(f"Could not compute dimensions for initial dataset version: {e}")
+
+        from app.db.models import DatasetVersion
+        initial_version = DatasetVersion(
+            dataset_id=dataset.id,
+            version=1,
+            file_path=target_path,
+            file_size=file_size,
+            row_count=row_count,
+            column_count=col_count,
+            change_summary="Initial upload",
+        )
+        db.add(initial_version)
+        db.commit()
 
         # Log activity
         from app.services.auth_service import AuthService
@@ -111,24 +140,26 @@ class DatasetService:
 
     @staticmethod
     def get_all(db: Session, user_id: Optional[str] = None) -> List[Dataset]:
-        """Retrieves datasets for user ordered by creation time descending."""
-        query = db.query(Dataset)
-        if user_id:
-            query = query.filter((Dataset.user_id == user_id) | (Dataset.user_id.is_(None)))
-        return query.order_by(Dataset.created_at.desc()).all()
+        """Retrieves datasets strictly belonging to the specified user ordered by creation time descending."""
+        if not user_id:
+            return []
+        return db.query(Dataset).filter(Dataset.user_id == user_id).order_by(Dataset.created_at.desc()).all()
 
     @staticmethod
-    def get_by_id(db: Session, dataset_id: str) -> Optional[Dataset]:
-        """Finds a dataset by ID."""
-        return db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    def get_by_id(db: Session, dataset_id: str, user_id: Optional[str] = None) -> Optional[Dataset]:
+        """Finds a dataset by ID, optionally enforcing user ownership."""
+        query = db.query(Dataset).filter(Dataset.id == dataset_id)
+        if user_id is not None:
+            query = query.filter(Dataset.user_id == user_id)
+        return query.first()
 
     @staticmethod
-    def get_profile(db: Session, dataset_id: str) -> dict:
+    def get_profile(db: Session, dataset_id: str, user_id: Optional[str] = None) -> dict:
         """Retrieves or calculates dataset profile metadata."""
         import json
         from app.services.profiler import DatasetProfiler
 
-        dataset = DatasetService.get_by_id(db, dataset_id)
+        dataset = DatasetService.get_by_id(db, dataset_id, user_id=user_id)
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -161,6 +192,7 @@ class DatasetService:
     def preview_dataset(
         db: Session,
         dataset_id: str,
+        user_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
         search: Optional[str] = None,
@@ -172,7 +204,7 @@ class DatasetService:
         import pandas as pd
         from app.services.profiler import DatasetProfiler
 
-        dataset = DatasetService.get_by_id(db, dataset_id)
+        dataset = DatasetService.get_by_id(db, dataset_id, user_id=user_id)
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -237,9 +269,9 @@ class DatasetService:
         }
 
     @staticmethod
-    def delete_dataset(db: Session, dataset_id: str) -> bool:
+    def delete_dataset(db: Session, dataset_id: str, user_id: Optional[str] = None) -> bool:
         """Deletes dataset record from database and removes stored file from disk."""
-        dataset = DatasetService.get_by_id(db, dataset_id)
+        dataset = DatasetService.get_by_id(db, dataset_id, user_id=user_id)
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

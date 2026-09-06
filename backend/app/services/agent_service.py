@@ -111,19 +111,45 @@ class AIAgent:
             "description": "Generate a full correlation heatmap or correlation ranking chart for the dataset.",
             "parameters": {"dataset_id": "string", "target": "string (optional)"},
         },
+        {
+            "name": "ask_data_sql",
+            "description": "Query, filter, aggregate, calculate, or ask questions about the active CSV dataset using DuckDB Text-to-SQL. Returns generated SQL, tabular data rows, and auto-visualization chart.",
+            "parameters": {
+                "dataset_id": "string",
+                "question": "string",
+            },
+        },
     ]
 
-    SYSTEM_PROMPT = """You are an expert AI Data Scientist assistant for this AutoML platform.
-You help users analyze datasets, preview CSV head rows, generate ANY visual graphs & charts requested, formulate and apply intelligent feature engineering recipes, intelligently pick model families, train ML models, review evaluations, and interpret predictions.
+    SYSTEM_PROMPT = """You are an expert AI Data Scientist assistant and conversational companion for this AutoML platform.
+You combine the skills of a principal data scientist, machine learning engineer, and data analyst.
+
+YOUR CAPABILITIES:
+1. General Data Science Consultation:
+   - Talk in general as a knowledgeable data scientist: explain machine learning algorithms (Random Forest, XGBoost, LightGBM, Logistic Regression, Neural Nets, SVM, Clustering, ARIMA), mathematical foundations, statistics, evaluation metrics (ROC-AUC, PR-AUC, F1, Log-Loss, RMSE, MAE, R2), cross-validation strategies, and write clean Python/pandas/scikit-learn code.
+   - You can chat freely about general concepts even when NO dataset is selected!
+
+2. Talk About and Query Uploaded CSV Data:
+   - When a dataset is active, you know its schema, row count, column names, and data types.
+   - When the user asks ANY question about the data in the CSV (e.g., "what is the average price by category?", "how many rows have null age?", "show top 10 rows sorted by revenue", "who are the top customers?"), call the 'ask_data_sql' tool. It executes safe DuckDB SQL and generates tabular data and visual charts!
+
+3. Autonomous Actions ("Do things for the data scientist"):
+   - 'auto_pilot_pipeline': Run the full autonomous AutoML pipeline (smart cleaning, feature engineering, model training, cross-validation, and SHAP explainability).
+   - 'preview_dataset_head': Preview raw CSV rows in an interactive table spreadsheet.
+   - 'profile_dataset': Summarize dataset shape, data types, missing values, duplicates.
+   - 'run_eda': Run comprehensive exploratory data analysis with distributions and correlations.
+   - 'detect_issues': Scan for data quality problems, anomalies, and outliers.
+   - 'suggest_target': Recommend the best target column for predictive modeling.
+   - 'train_models': Train candidate ML models and produce an evaluation leaderboard.
+   - 'generate_chart': Generate ANY interactive visual chart (bar, line, area, scatter, bubble, pie, donut, radar, boxplot, heatmap).
 
 CRITICAL RULES:
-1. NEVER fabricate statistics, metrics, predictions, or feature importances.
-2. When you need numerical answers, data details, or graphs, call the appropriate tool to get the real result.
-3. When the user asks to run end-to-end data science, auto-pilot, automated feature engineering and model training, call 'auto_pilot_pipeline'.
-4. When the user asks for ANY chart, plot, graph, or visual analysis (e.g. "box plot of X", "radar chart of metrics", "stacked bar of A vs B", "donut chart of status", "scatter plot of X vs Y", "area chart of trends", "bubble chart", "heatmap", "compare models in a chart"), call 'generate_chart', 'compare_models_chart', or 'plot_correlation_chart'.
-5. When the user asks to preview or view the CSV file, table, or head rows (e.g. "show csv preview", "show head of csv", "show first 10 rows", "view table"), call 'preview_dataset_head'.
-6. Explain results in clear, structured markdown.
-7. Base all answers on actual computation results.
+1. When answering general questions, theory, concepts, or giving advice, reply directly in structured, clear, professional Markdown (do NOT call a tool if no data operation is needed).
+2. When the user asks to query, filter, aggregate, calculate, or examine data from the active CSV dataset, call 'ask_data_sql'.
+3. When the user asks to train models or run end-to-end AutoML, call 'auto_pilot_pipeline'.
+4. When the user asks for ANY chart or graph, call 'generate_chart', 'compare_models_chart', or 'plot_correlation_chart'.
+5. When the user asks to preview or view CSV rows or tables, call 'preview_dataset_head'.
+6. Base all data statements on actual computed results. NEVER fabricate dataset rows or statistics.
 
 Available Tools:
 {tools}
@@ -276,35 +302,40 @@ Available context will be provided with current dataset and models."""
         """Use Groq LLM to intelligently select tools and answer with grounded context."""
         from app.db.models import Dataset
 
-        dataset_info = "No dataset currently selected."
+        dataset_info = "No dataset currently selected. You can chat freely about general data science, statistics, algorithms, and code."
         all_datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).limit(5).all()
         dataset_list_str = ", ".join([f"'{d.original_filename}' (id: {d.id})" for d in all_datasets])
 
         current_dataset = None
         columns_str = ""
+        sample_preview = ""
         if dataset_id:
             current_dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
             if current_dataset:
                 try:
                     from app.services.profiler import DatasetProfiler
                     df_sample = DatasetProfiler.load_dataset(current_dataset.file_path)
-                    columns_str = f"Columns: {', '.join(df_sample.columns.tolist())}"
+                    dtypes_summary = [f"{col} ({df_sample[col].dtype})" for col in df_sample.columns[:25]]
+                    columns_str = f"Columns & Types: {', '.join(dtypes_summary)}"
+                    sample_preview = f"Sample first 3 rows:\n{df_sample.head(3).to_dict(orient='records')}"
                 except Exception:
                     pass
 
                 dataset_info = (
                     f"Active Dataset: '{current_dataset.original_filename}' (ID: `{current_dataset.id}`, "
-                    f"Target: {current_dataset.target_column or 'None'}). {columns_str}"
+                    f"Rows: {current_dataset.row_count or 'Unknown'}, "
+                    f"Target: {current_dataset.target_column or 'None'}).\n"
+                    f"{columns_str}\n{sample_preview}"
                 )
 
         system_instruction = (
             f"{cls.SYSTEM_PROMPT.format(tools=json.dumps(cls.TOOL_DEFINITIONS, indent=2))}\n\n"
-            f"Context:\n"
+            f"Current Context:\n"
             f"- {dataset_info}\n"
-            f"- Available datasets: {dataset_list_str if dataset_list_str else 'None'}\n\n"
-            f"To execute tools, reply with a JSON object in this format if a tool is needed:\n"
-            f'{{"action": "tool_call", "tool": "<tool_name>", "params": {{...}}}}\n'
-            f"Or if answering directly or explaining, reply with normal markdown text."
+            f"- Available datasets on platform: {dataset_list_str if dataset_list_str else 'None'}\n\n"
+            f"If a tool is needed to perform an action or query the data, reply strictly with a JSON object in this format:\n"
+            f'{{"action": "tool_call", "tool": "<tool_name>", "params": {{...}}}}\n\n'
+            f"If answering a general question, explaining concepts, giving data science advice, or writing code, reply directly with friendly, well-formatted Markdown text."
         )
 
         chat_messages = [
@@ -315,11 +346,11 @@ Available context will be provided with current dataset and models."""
             db.query(AgentMessage)
             .filter(AgentMessage.session_id == session.id)
             .order_by(AgentMessage.created_at.desc())
-            .limit(4)
+            .limit(6)
             .all()
         )
         for h in reversed(recent_history):
-            chat_messages.append({"role": h.role, "content": h.content[:1000]})
+            chat_messages.append({"role": h.role, "content": h.content[:1500]})
 
         chat_messages.append({"role": "user", "content": message})
 
@@ -332,11 +363,23 @@ Available context will be provided with current dataset and models."""
 
         reply = response.choices[0].message.content.strip()
 
-        if reply.startswith("{") and "tool" in reply:
+        # Check if the LLM output specifies a tool call
+        tool_call_match = None
+        if "tool" in reply:
             try:
-                tool_data = json.loads(reply)
-                tool_name = tool_data.get("tool")
-                params = tool_data.get("params", {})
+                if reply.startswith("{") and reply.endswith("}"):
+                    tool_call_match = json.loads(reply)
+                else:
+                    match = re.search(r'\{\s*"action"\s*:\s*"tool_call".*?\}', reply, re.DOTALL) or re.search(r'\{\s*"tool"\s*:.*?"params"\s*:.*?\}', reply, re.DOTALL)
+                    if match:
+                        tool_call_match = json.loads(match.group(0))
+            except Exception:
+                pass
+
+        if tool_call_match:
+            try:
+                tool_name = tool_call_match.get("tool")
+                params = tool_call_match.get("params", {})
                 if not params.get("dataset_id") and dataset_id:
                     params["dataset_id"] = dataset_id
 
@@ -344,6 +387,10 @@ Available context will be provided with current dataset and models."""
                     return cls._execute_tool(tool_name, db, params, user_query=message)
             except Exception:
                 pass
+
+        # If the LLM answered conversationally (e.g. general data science question, advice, code snippet):
+        if reply and not reply.startswith('{"action": "tool_call"'):
+            return reply, [], []
 
         return cls._process_with_tools(db, message, dataset_id, session)
 
@@ -355,26 +402,99 @@ Available context will be provided with current dataset and models."""
         dataset_id: Optional[str],
         session: AgentSession,
     ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Process message using deterministic tool matching and execution."""
+        """Process message using deterministic tool matching and intelligent offline knowledge base."""
         message_lower = message.lower().strip()
 
+        # ─── General Data Science Greetings & Conversational Knowledge Base ───
         if not dataset_id:
+            # Greetings
+            if any(message_lower.startswith(g) or message_lower == g for g in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "help"]):
+                from app.db.models import Dataset
+                datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).limit(5).all()
+                ds_bullets = "\n".join([f"• **{d.original_filename}** ({d.row_count or 0:,} rows)" for d in datasets]) if datasets else "*(No datasets uploaded yet)*"
+                return (
+                    f"👋 **Hello! I'm your AI Data Scientist Companion.**\n\n"
+                    f"I can help you with both **general data science tasks** and **deep analysis of your CSV datasets**:\n\n"
+                    f"### 🚀 What I Can Do For You:\n"
+                    f"1. **Talk Data Science in General**: Ask me about ML algorithms (Random Forest, XGBoost, LightGBM), statistics, feature engineering, cross-validation, and metrics (ROC-AUC vs PR-AUC).\n"
+                    f"2. **Query CSV Data with DuckDB**: Select an uploaded dataset to filter, aggregate, calculate metrics, and generate instant charts.\n"
+                    f"3. **Autonomous Auto-Pilot**: Run end-to-end data cleaning, feature generation, model training, and SHAP explainability.\n"
+                    f"4. **Visual Chart Generation**: Request boxplots, correlation heatmaps, scatter plots, radar charts, and more.\n\n"
+                    f"**Available Datasets in Platform**:\n{ds_bullets}\n\n"
+                    f"*Select a dataset from the dropdown above to query your data, or ask me any data science question right now!*",
+                    [],
+                    []
+                )
+
+            # General Data Science Concept Matching (Offline fallback when no dataset is selected)
+            if any(kw in message_lower for kw in ["imbalance", "imbalanced", "smote", "class weight"]):
+                return (
+                    "### ⚖️ Handling Imbalanced Datasets: Best Practices\n\n"
+                    "When classes are heavily imbalanced (e.g. 99% negative, 1% positive in fraud detection or medical diagnosis):\n\n"
+                    "1. **Do NOT use Accuracy**: A trivial model predicting the majority class achieves 99% accuracy but is useless.\n"
+                    "2. **Recommended Metrics**:\n"
+                    "   • **PR-AUC (Precision-Recall AUC)**: Highly sensitive to the minority class.\n"
+                    "   • **F1-Score / F-beta**: Harmonic mean of Precision and Recall (use F2 to prioritize Recall).\n"
+                    "   • **Balanced Accuracy** & **Cohen's Kappa**.\n"
+                    "3. **Resampling Techniques**:\n"
+                    "   • **SMOTE** (Synthetic Minority Over-sampling Technique) / ADASYN.\n"
+                    "   • **Random Under-sampling** of majority class.\n"
+                    "4. **Algorithm-Level Adjustments**:\n"
+                    "   • Set `scale_pos_weight` in XGBoost / LightGBM.\n"
+                    "   • Set `class_weight='balanced'` in Scikit-Learn Random Forest and Logistic Regression.\n"
+                    "5. **Threshold Tuning**: Optimize classification threshold instead of the default `0.5`.",
+                    [],
+                    []
+                )
+
+            if any(kw in message_lower for kw in ["roc", "pr-auc", "precision", "recall", "metric"]):
+                return (
+                    "### 📊 Evaluation Metrics Guide\n\n"
+                    "| Metric | Best Used For | Notes |\n"
+                    "| :--- | :--- | :--- |\n"
+                    "| **ROC-AUC** | Balanced binary classification | Measures rank ordering across all thresholds; can be overly optimistic on extreme imbalance. |\n"
+                    "| **PR-AUC** | Highly imbalanced classification | Focuses directly on true positives without being influenced by large true negatives. |\n"
+                    "| **F1-Score** | Balance between Precision & Recall | F1 = 2 * (Precision * Recall) / (Precision + Recall). |\n"
+                    "| **Log-Loss** | Probability calibration | Heavily penalizes confident incorrect predictions. |\n"
+                    "| **RMSE / MAE** | Regression tasks | RMSE penalizes large errors more heavily than MAE. |\n"
+                    "| **R² Score** | Regression variance explanation | Proportion of variance explained by model (1.0 = perfect). |",
+                    [],
+                    []
+                )
+
+            if any(kw in message_lower for kw in ["random forest", "xgboost", "lightgbm", "gradient boost", "difference"]):
+                return (
+                    "### 🌲 Random Forest vs. Gradient Boosting (XGBoost / LightGBM)\n\n"
+                    "Both are ensemble tree methods, but they differ fundamentally:\n\n"
+                    "• **Random Forest (Bagging)**:\n"
+                    "  - Builds independent deep trees in parallel using bootstrap samples and random feature subsets.\n"
+                    "  - Reduces **variance** (less prone to overfitting), highly robust to noise with minimal hyperparameter tuning.\n\n"
+                    "• **XGBoost / LightGBM (Boosting)**:\n"
+                    "  - Builds shallow trees sequentially; each new tree corrects residual errors made by preceding trees.\n"
+                    "  - Reduces **bias and variance**, consistently achieves top benchmark performance on tabular datasets.\n"
+                    "  - Requires tuning of `learning_rate`, `max_depth`, `subsample`, and regularization parameters.",
+                    [],
+                    []
+                )
+
             from app.db.models import Dataset
             datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).limit(5).all()
             if datasets:
                 dataset_list = "\n".join([f"• **{d.original_filename}** (ID: `{d.id}`)" for d in datasets])
                 return (
-                    f"I can see {len(datasets)} dataset(s) in the platform:\n\n{dataset_list}\n\n"
-                    "Please select a dataset to work with, or ask me a specific question about one.",
+                    f"I can help you with general data science questions, or you can select one of the platform's datasets to query:\n\n{dataset_list}\n\n"
+                    "Select a dataset from the dropdown above to run DuckDB SQL queries, generate charts, or train models!",
                     [],
                     []
                 )
             return (
-                "No datasets are loaded yet. Please upload a dataset first through the **Datasets** page, "
-                "then come back and I can help you analyze it.",
+                "No datasets are loaded yet. Please upload a dataset through the **Datasets** page, "
+                "or ask me any general data science or machine learning question right now!",
                 [],
                 []
             )
+
+        # ─── Dataset Active: Route Actions & Queries ─────────────────────────
 
         # 1. Autonomous AI Auto-Pilot Pipeline Intent
         if any(kw in message_lower for kw in [
@@ -398,17 +518,17 @@ Available context will be provided with current dataset and models."""
             else:
                 return cls._execute_tool("generate_chart", db, {"dataset_id": dataset_id}, user_query=message)
 
-        # 4. General Tool Intent Routing
-        if any(kw in message_lower for kw in ["profile", "overview", "describe", "info", "summary", "shape", "how many rows"]):
+        # 4. Profiling & Issues Intent Routing
+        if any(kw in message_lower for kw in ["profile", "overview", "describe", "info", "summary", "shape"]):
             return cls._execute_tool("profile_dataset", db, {"dataset_id": dataset_id}, user_query=message)
 
         if any(kw in message_lower for kw in ["missing", "quality", "issue", "problem", "clean", "duplicate", "outlier"]):
             return cls._execute_tool("detect_issues", db, {"dataset_id": dataset_id}, user_query=message)
 
-        if any(kw in message_lower for kw in ["target", "predict what", "which column", "suggest"]):
+        if any(kw in message_lower for kw in ["target", "predict what", "which column", "suggest target"]):
             return cls._execute_tool("suggest_target", db, {"dataset_id": dataset_id}, user_query=message)
 
-        if any(kw in message_lower for kw in ["eda", "explore", "distribution", "statistic"]):
+        if any(kw in message_lower for kw in ["eda", "explore", "statistic"]):
             return cls._execute_tool("run_eda", db, {"dataset_id": dataset_id}, user_query=message)
 
         if any(kw in message_lower for kw in ["train", "model", "automl", "leaderboard", "best model", "experiment"]):
@@ -422,10 +542,9 @@ Available context will be provided with current dataset and models."""
                 return cls._execute_tool("get_leaderboard", db, {"dataset_id": dataset_id}, user_query=message)
             else:
                 return (
-                    "No models have been trained yet for this dataset. To train models:\n\n"
-                    "1. Go to **Feature Engineering** or **EDA** to configure your features & target\n"
-                    "2. Go to **Experiments** and click **Start Training**\n\n"
-                    "Or tell me which column you want to predict, and I can trigger training for you.",
+                    "No models have been trained yet for this dataset. You can:\n\n"
+                    "1. Say **'Run Auto-Pilot'** to have me automatically clean data, engineer features, and train models!\n"
+                    "2. Or tell me which column you'd like to predict.",
                     [],
                     []
                 )
@@ -446,34 +565,8 @@ Available context will be provided with current dataset and models."""
             else:
                 return ("No deployed models found for this dataset. Deploy a model to track data drift and health.", [], [])
 
-        # Default: answer the actual question from the selected dataset rather
-        # than returning a canned list of product capabilities.
-        from app.db.models import Dataset
-        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-        if dataset:
-            try:
-                from app.services.text2sql_service import Text2SQLService
-                answer = Text2SQLService.ask_data(dataset_id, message, db)
-                rows = answer.get("rows", [])
-                columns = answer.get("columns", [])
-                charts = [{
-                    "id": f"answer_{int(time.time())}",
-                    "type": "table",
-                    "title": f"Answer from {dataset.original_filename}",
-                    "description": answer.get("explanation", ""),
-                    "data": rows,
-                    "config": {"columns": columns},
-                }]
-                return answer.get("explanation", "I answered using the selected dataset."), [{"tool": "answer_dataset_question", "params": {"dataset_id": dataset_id}}], charts
-            except Exception as exc:
-                logger.warning("Grounded fallback failed: %s", exc)
-            return (
-                f"I could not answer that question from **{dataset.original_filename}**. Try naming a column or ask about rows, columns, missing values, averages, totals, rankings, or distributions.",
-                [],
-                []
-            )
-
-        return ("I'm ready to help. Please select a dataset or ask me a question about your data.", [], [])
+        # 5. Data Queries via DuckDB Text-to-SQL (Ask Data Core)
+        return cls._execute_tool("ask_data_sql", db, {"dataset_id": dataset_id, "question": message}, user_query=message)
 
     @classmethod
     def _execute_tool(
@@ -488,6 +581,51 @@ Available context will be provided with current dataset and models."""
         charts: List[Dict[str, Any]] = []
 
         try:
+            # ─── Ask Data DuckDB Text-to-SQL Tool ────────────────────────
+            if tool_name in ["ask_data_sql", "query_data_sql", "answer_dataset_question"]:
+                dataset_id = params.get("dataset_id")
+                from app.db.models import Dataset
+                from app.services.text2sql_service import Text2SQLService
+                dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+                if not dataset:
+                    return f"Dataset `{dataset_id}` not found.", tool_calls, charts
+
+                question = params.get("question") or user_query or "Show rows"
+                result = Text2SQLService.ask_data(dataset_id, question, db)
+
+                sql = result.get("sql", "")
+                rows = result.get("rows", [])
+                cols = result.get("columns", [])
+                explanation = result.get("explanation", "")
+                chart_type = result.get("chart_type", "table")
+                row_count = result.get("row_count", len(rows))
+
+                # Build Markdown explanation
+                md_resp = f"## 🦆 DuckDB Query Result: **{dataset.original_filename}**\n\n"
+                md_resp += f"{explanation}\n\n"
+                if sql:
+                    md_resp += f"```sql\n{sql}\n```\n\n"
+                md_resp += f"*Returned {row_count:,} row(s) across {len(cols)} column(s).*"
+
+                # Add interactive Table & Visualization chart payload
+                charts.append({
+                    "id": f"sql_{int(time.time())}",
+                    "type": chart_type,
+                    "title": f"DuckDB Query: {dataset.original_filename}",
+                    "description": explanation,
+                    "data": rows,
+                    "x_key": result.get("x_axis") or (cols[0] if cols else None),
+                    "y_key": result.get("y_axis") or (cols[1] if len(cols) > 1 else None),
+                    "config": {
+                        "sql": sql,
+                        "columns": cols,
+                        "row_count": row_count,
+                        "is_sql_query": True,
+                    }
+                })
+
+                return md_resp, tool_calls, charts
+
             # ─── Autonomous AI Auto-Pilot Pipeline ──────────────────────
             if tool_name == "auto_pilot_pipeline":
                 result = cls.run_auto_pilot_pipeline(

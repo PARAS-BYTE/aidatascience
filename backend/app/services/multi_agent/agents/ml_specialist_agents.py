@@ -198,6 +198,11 @@ class ClassificationAgent:
             X = blackboard.get("features_X")
             y = blackboard.get("features_y")
 
+        if isinstance(X, list):
+            X = pd.DataFrame(X)
+        if isinstance(y, list):
+            y = np.array(y)
+
         if X is None or y is None or len(X) < 10:
             return {"error": "Insufficient features or target for classification"}
 
@@ -240,10 +245,11 @@ class ClassificationAgent:
                     "status": "failed",
                 })
 
+        valid_results = [r for r in results if "f1_score" in r]
         output = {
             "task_type": "classification",
             "models_evaluated": results,
-            "best_model": sorted([r for r in results if "f1_score" in r], key=lambda x: x["f1_score"], reverse=True)[0]["model_name"] if results else None,
+            "best_model": sorted(valid_results, key=lambda x: x["f1_score"], reverse=True)[0]["model_name"] if valid_results else None,
         }
 
         blackboard.set("classification_results", output, agent_name="ClassificationAgent")
@@ -261,6 +267,11 @@ class RegressionAgent:
             FeatureEngineeringAgent.run(blackboard)
             X = blackboard.get("features_X")
             y = blackboard.get("features_y")
+
+        if isinstance(X, list):
+            X = pd.DataFrame(X)
+        if isinstance(y, list):
+            y = np.array(y)
 
         if X is None or y is None or len(X) < 10:
             return {"error": "Insufficient features or target for regression"}
@@ -301,10 +312,11 @@ class RegressionAgent:
                     "status": "failed",
                 })
 
+        valid_reg_results = [r for r in results if "r2_score" in r]
         output = {
             "task_type": "regression",
             "models_evaluated": results,
-            "best_model": sorted([r for r in results if "r2_score" in r], key=lambda x: x["r2_score"], reverse=True)[0]["model_name"] if results else None,
+            "best_model": sorted(valid_reg_results, key=lambda x: x["r2_score"], reverse=True)[0]["model_name"] if valid_reg_results else None,
         }
 
         blackboard.set("regression_results", output, agent_name="RegressionAgent")

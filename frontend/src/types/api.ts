@@ -76,3 +76,43 @@ export interface UserProfileSummary {
   recent_activities: UserActivity[];
 }
 
+export interface Project {
+  id: string;
+  user_id: string;
+  name: string;
+  description?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  datasets?: number;
+  experiments?: number;
+  completed_experiments?: number;
+  models?: number;
+  best_model?: {
+    algorithm: string;
+    metrics: Record<string, any>;
+    experiment_id: string;
+  } | null;
+}
+
+export interface ProjectStats extends Project {
+  project_id: string;
+}
+
+export interface DatasetVersionItem {
+  id: string;
+  version: number;
+  file_size: number;
+  row_count?: number;
+  column_count?: number;
+  change_summary?: string;
+  created_at: string;
+}
+
+export interface DatasetVersionsResponse {
+  dataset_id: string;
+  current_version: number;
+  versions: DatasetVersionItem[];
+}
+
+

@@ -7,11 +7,15 @@ import { formatBytes } from '../utils/formatters';
 import { DatasetTablePreview } from './DatasetTablePreview';
 import { AIAutoPilotModal } from './AIAutoPilotModal';
 
+import { useAuthStore } from '../store/authStore';
+
 interface Props {
   onUploadSuccess?: (dataset: Dataset) => void;
 }
 
 export const UploadZone: React.FC<Props> = ({ onUploadSuccess }) => {
+  const user = useAuthStore((s) => s.user);
+  const openAuthModal = useAuthStore((s) => s.openAuthModal);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [lastUploaded, setLastUploaded] = useState<Dataset | null>(null);
@@ -21,6 +25,12 @@ export const UploadZone: React.FC<Props> = ({ onUploadSuccess }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (file: File) => {
+    if (!user) {
+      openAuthModal('login');
+      setError('Please log in to upload datasets. Your data will be strictly private to your account.');
+      return;
+    }
+
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!ext || !['csv', 'xlsx', 'xls'].includes(ext)) {
       setError('Invalid file type. Only CSV and XLSX formats are allowed.');

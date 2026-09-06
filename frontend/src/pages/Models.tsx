@@ -1,16 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../services/api';
+import { useAuthStore } from '../store/authStore';
 import { Box, Shield, Archive, Rocket, RefreshCw, ArrowRight } from 'lucide-react';
 
 export const Models: React.FC = () => {
+  const user = useAuthStore((s) => s.user);
   const [models, setModels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = () => {
+    if (!user) {
+      setModels([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     apiService.getModels().then(r => setModels(r.items || [])).finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(load, [user]);
 
   const statusColors: Record<string, string> = {
     TRAINED: 'bg-sky-500/10 text-sky-400 border-sky-500/20',

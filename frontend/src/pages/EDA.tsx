@@ -1,22 +1,46 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
-import { BarChart3, AlertCircle, Loader2, ArrowRight, Zap, Sparkles, AlertTriangle, CheckCircle2, ShieldAlert, ArrowUpRight } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import {
+  BarChart3, AlertCircle, Loader2, Sparkles,
+  AlertTriangle, CheckCircle2, ShieldAlert, ArrowUpRight,
+  Scale, FileText, Download, Play
+} from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 export const EDA: React.FC = () => {
   const navigate = useNavigate();
   const [datasets, setDatasets] = useState<any[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string>('');
+  const [targetColumn, setTargetColumn] = useState<string>('');
   const [eda, setEda] = useState<any>(null);
   const [insights, setInsights] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Phase 3 States
+  const [activeSection, setActiveSection] = useState<'visuals' | 'hypothesis' | 'report'>('visuals');
+  const [statsData, setStatsData] = useState<any>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [reportData, setReportData] = useState<any>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  // Pairwise test playground
+  const [colA, setColA] = useState<string>('');
+  const [colB, setColB] = useState<string>('');
+  const [pairwiseResult, setPairwiseResult] = useState<any>(null);
+  const [runningPairwise, setRunningPairwise] = useState(false);
+
+  // Smart chart recommendation
+  const [chartRec, setChartRec] = useState<any>(null);
+
   useEffect(() => {
     apiService.getDatasets().then(r => {
       setDatasets(r.items || []);
-      if (r.items?.length > 0) setSelectedDataset(r.items[0].id);
+      if (r.items?.length > 0) {
+        setSelectedDataset(r.items[0].id);
+        if (r.items[0].target_column) setTargetColumn(r.items[0].target_column);
+      }
     });
   }, []);
 
@@ -29,9 +53,36 @@ export const EDA: React.FC = () => {
     }
   };
 
+  const loadStatisticalTests = async (datasetId: string, target?: string) => {
+    try {
+      setLoadingStats(true);
+      const res = await apiService.getStatisticalTests(datasetId, target || undefined);
+      setStatsData(res);
+    } catch (e) {
+      console.error("Failed to load statistical tests", e);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
+  const loadAutoEdaReport = async (datasetId: string, target?: string) => {
+    try {
+      setLoadingReport(true);
+      const res = await apiService.getAutoEdaReport(datasetId, target || undefined);
+      setReportData(res);
+    } catch (e) {
+      console.error("Failed to load auto-eda report", e);
+    } finally {
+      setLoadingReport(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedDataset) {
       loadInsights(selectedDataset);
+      loadStatisticalTests(selectedDataset, targetColumn);
+      setPairwiseResult(null);
+      setChartRec(null);
     }
   }, [selectedDataset]);
 
@@ -40,184 +91,190 @@ export const EDA: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await apiService.runEda(selectedDataset);
+      const result = await apiService.runEda(selectedDataset, targetColumn || undefined);
       setEda(result);
       await loadInsights(selectedDataset);
+      await loadStatisticalTests(selectedDataset, targetColumn);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'EDA failed');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  const handleRunPairwiseTest = async () => {
+    if (!selectedDataset || !colA || !colB) return;
+    try {
+      setRunningPairwise(true);
+      const [testRes, recRes] = await Promise.all([
+        apiService.getStatisticalTests(selectedDataset, undefined, colA, colB),
+        apiService.getChartRecommendation(selectedDataset, colA, colB),
+      ]);
+      setPairwiseResult(testRes);
+      setChartRec(recRes);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Pairwise test failed.');
+    } finally {
+      setRunningPairwise(false);
+    }
+  };
+
+  const downloadMarkdownReport = () => {
+    if (!reportData?.markdown_report) return;
+    const blob = new Blob([reportData.markdown_report], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `auto_eda_report_${selectedDataset}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getSeverityStyle = (severity: string) => {
     switch (severity.toLowerCase()) {
       case 'critical':
         return {
-          bg: 'bg-rose-500/10 border-rose-500/30 text-rose-400',
-          badge: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
-          icon: <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+          bg: 'bg-rose-50 border-rose-200 text-rose-800',
+          badge: 'bg-rose-100 text-rose-700 border border-rose-200',
+          icon: <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
         };
       case 'high':
         return {
-          bg: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
-          badge: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-          icon: <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+          bg: 'bg-amber-50 border-amber-200 text-amber-800',
+          badge: 'bg-amber-100 text-amber-700 border border-amber-200',
+          icon: <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
         };
       case 'medium':
         return {
-          bg: 'bg-sky-500/10 border-sky-500/30 text-sky-400',
-          badge: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',
-          icon: <AlertCircle className="w-4 h-4 text-sky-400 shrink-0" />
+          bg: 'bg-blue-50 border-blue-200 text-blue-800',
+          badge: 'bg-blue-100 text-blue-700 border border-blue-200',
+          icon: <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
         };
       default:
         return {
-          bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
-          badge: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-          icon: <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          bg: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+          badge: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+          icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
         };
     }
   };
 
-  const COLORS = ['#38bdf8', '#818cf8', '#34d399', '#fbbf24', '#fb923c', '#f472b6', '#a78bfa', '#22d3ee'];
+  const allColumns = eda?.numerical_stats?.map((s: any) => s.column)
+    .concat(eda?.categorical_stats?.map((s: any) => s.column) || []) || [];
 
   return (
-    <div className="space-y-6">
-      <div className="animate-fade-in-up">
-        <div className="flex items-center gap-2 mb-1">
-          <BarChart3 className="w-5 h-5 text-sky-400" />
-          <span className="text-xs font-semibold text-sky-400 uppercase tracking-wider">Analysis</span>
-        </div>
-        <h1 className="text-3xl font-black text-slate-100 tracking-tight">Exploratory Data Analysis</h1>
-        <p className="text-sm text-slate-400 mt-1">Real statistics computed from your dataset</p>
-      </div>
-
-      {/* Dataset selector */}
-      <div className="animate-fade-in-up stagger-1 flex items-center gap-4">
-        <select
-          value={selectedDataset}
-          onChange={e => setSelectedDataset(e.target.value)}
-          className="bg-slate-900/80 border border-slate-700/60 text-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-sky-500/50 transition-colors"
-        >
-          <option value="">Select dataset...</option>
-          {datasets.map(d => (
-            <option key={d.id} value={d.id}>{d.original_filename}</option>
-          ))}
-        </select>
-        <button onClick={runEda} disabled={!selectedDataset || loading}
-          className="px-5 py-2.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-sky-500/20 transition-all">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-          {loading ? 'Analyzing...' : 'Run EDA'}
-        </button>
-      </div>
-
-      {/* Loading skeleton */}
-      {loading && (
-        <div className="space-y-4 animate-fade-in">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="skeleton skeleton-card" />)}
+    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-16">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+              <BarChart3 className="w-5 h-5" />
+            </span>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Exploratory Data Analysis & Statistics
+            </h1>
           </div>
-          <div className="skeleton h-64 rounded-xl" />
+          <p className="text-sm text-slate-500 mt-1">
+            Deterministic descriptive statistics, inferential hypothesis tests, and auto-generated insights.
+          </p>
         </div>
-      )}
+
+        {/* Dataset selector & Run CTA */}
+        <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-slate-200/80 shadow-sm">
+          <select
+            value={selectedDataset}
+            onChange={e => setSelectedDataset(e.target.value)}
+            className="py-1.5 px-3 text-xs font-semibold rounded-xl border-none bg-slate-50 focus:bg-white"
+          >
+            {datasets.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.original_filename} (v{d.version || 1})
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={runEda}
+            disabled={loading || !selectedDataset}
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition-all"
+          >
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            Compute EDA
+          </button>
+        </div>
+      </div>
 
       {error && (
-        <div className="animate-fade-in p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 shrink-0" /> {error}
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-medium flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
         </div>
       )}
 
-      {eda && !loading && (
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200 overflow-x-auto pb-px">
+        {[
+          { id: 'visuals', label: 'Visual Distributions & Correlations', icon: BarChart3 },
+          { id: 'hypothesis', label: 'Hypothesis Testing & Inference', icon: Scale },
+          { id: 'report', label: 'Auto-EDA Executive Report', icon: FileText },
+        ].map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeSection === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setActiveSection(tab.id as any);
+                if (tab.id === 'report' && !reportData) {
+                  loadAutoEdaReport(selectedDataset, targetColumn);
+                }
+              }}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 whitespace-nowrap transition-colors ${
+                isActive
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* TAB 1: VISUAL DISTRIBUTIONS & CORRELATIONS */}
+      {activeSection === 'visuals' && (
         <div className="space-y-6">
-          {/* Overview */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: 'Rows', value: eda.shape?.rows?.toLocaleString(), color: 'slate' },
-              { label: 'Columns', value: eda.shape?.columns, color: 'slate' },
-              { label: 'Numerical', value: eda.numerical_stats?.length || 0, color: 'sky' },
-              { label: 'Categorical', value: eda.categorical_stats?.length || 0, color: 'purple' },
-            ].map((card, idx) => (
-              <div key={card.label} className={`animate-fade-in-up stagger-${idx + 1} glass-card border border-slate-800/50 rounded-xl p-4`}>
-                <p className="text-xs text-slate-400 uppercase font-semibold">{card.label}</p>
-                <p className={`text-2xl font-bold mt-1 ${card.color === 'sky' ? 'text-sky-400' : card.color === 'purple' ? 'text-purple-400' : 'text-slate-100'}`}>{card.value}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Auto-Insights Card Feed */}
+          {/* Automated Insights Strip */}
           {insights.length > 0 && (
-            <div className="animate-fade-in-up glass-card border border-sky-500/20 rounded-2xl p-6 relative overflow-hidden bg-gradient-to-b from-slate-900/90 to-slate-950/90">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
-              
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center">
-                    <Sparkles className="w-4 h-4 text-sky-400 animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                      Auto-Insights Engine
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/30">
-                        {insights.length} Findings
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-400">Deterministic quality rules & statistical recommendations</p>
-                  </div>
+            <div className="glass-card border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-blue-600" />
+                  <h3 className="text-sm font-bold text-slate-900">Key Automated Insights</h3>
                 </div>
-
-                <button
-                  onClick={() => navigate('/cleaning')}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-xs font-semibold text-sky-400 border border-slate-700/50 flex items-center gap-1.5 transition-all shadow-sm"
-                >
-                  Go to Cleaning Pipeline <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
+                <span className="text-xs text-slate-400 font-mono">{insights.length} discovered</span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2">
-                {insights.map((ins: any) => {
-                  const style = getSeverityStyle(ins.severity);
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {insights.map((insight: any) => {
+                  const style = getSeverityStyle(insight.severity || 'low');
                   return (
                     <div
-                      key={ins.id || ins.message}
-                      className={`p-4 rounded-xl border transition-all hover:scale-[1.01] flex flex-col justify-between ${style.bg}`}
+                      key={insight.id}
+                      onClick={() => insight.action_url && navigate(insight.action_url)}
+                      className={`p-4 rounded-xl border ${style.bg} ${insight.action_url ? 'cursor-pointer hover:shadow-sm transition-all' : ''}`}
                     >
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {style.icon}
-                            {ins.column_name && (
-                              <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-slate-900/60 text-slate-200 border border-slate-700/50">
-                                {ins.column_name}
-                              </span>
-                            )}
-                            <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium">
-                              {ins.insight_type?.replace('_', ' ')}
-                            </span>
-                          </div>
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${style.badge}`}>
-                            {ins.severity}
-                          </span>
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2">
+                          {style.icon}
+                          <span className="text-xs font-bold text-slate-900">{insight.title}</span>
                         </div>
-
-                        <p className="text-sm font-medium text-slate-200 leading-snug">
-                          {ins.message}
-                        </p>
-
-                        {ins.suggested_action && (
-                          <div className="mt-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800/80 text-xs text-slate-300 flex items-start gap-2">
-                            <span className="text-sky-400 font-bold shrink-0">💡 Fix:</span>
-                            <span className="text-slate-300">{ins.suggested_action}</span>
-                          </div>
-                        )}
+                        {insight.action_url && <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
                       </div>
-
-                      <div className="mt-3 pt-2.5 border-t border-slate-800/40 flex justify-end">
-                        <button
-                          onClick={() => navigate('/cleaning')}
-                          className="text-xs text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          Apply in Cleaning <ArrowRight className="w-3 h-3" />
-                        </button>
-                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">{insight.description}</p>
                     </div>
                   );
                 })}
@@ -225,156 +282,307 @@ export const EDA: React.FC = () => {
             </div>
           )}
 
-          {/* Observations */}
-          {eda.observations?.length > 0 && (
-            <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-xl p-5">
-              <h3 className="text-sm font-bold text-slate-200 mb-3">Key Observations</h3>
-              <div className="space-y-2">
-                {eda.observations.map((obs: any, i: number) => (
-                  <div key={i} className={`p-3 rounded-xl text-sm flex items-start gap-2 ${
-                    obs.type === 'critical' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                    obs.type === 'warning' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                    'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                  }`}>
-                    <span className="shrink-0 mt-0.5">{obs.type === 'critical' ? <ShieldAlert className="w-4 h-4 text-rose-500" /> : obs.type === 'warning' ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : <AlertCircle className="w-4 h-4 text-blue-500" />}</span>
-                    <span>{obs.message}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Numerical Stats Table */}
-          {eda.numerical_stats?.length > 0 && (
-            <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-xl p-5 overflow-x-auto">
-              <h3 className="text-sm font-bold text-slate-200 mb-3">Numerical Statistics</h3>
-              <div className="rounded-xl border border-slate-800/50 overflow-hidden">
-                <table className="w-full text-sm text-left text-slate-300">
-                  <thead className="text-xs text-slate-400 uppercase bg-slate-900/80 border-b border-slate-800/50">
-                    <tr>
-                      {['Column', 'Mean', 'Median', 'Std', 'Min', 'Max', 'Q1', 'Q3', 'Missing'].map(h => (
-                        <th key={h} className="px-4 py-3 font-medium">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {eda.numerical_stats.map((s: any) => (
-                      <tr key={s.column} className="hover:bg-slate-800/20 transition-colors">
-                        <td className="px-4 py-2.5 font-medium text-slate-200">{s.column}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.mean}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.median}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.std}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.min}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.max}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.q1}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.q3}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{s.missing_pct}%</td>
+          {eda && (
+            <div className="space-y-6">
+              {/* Numerical Stats Table */}
+              {eda.numerical_stats?.length > 0 && (
+                <div className="glass-card border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4 overflow-x-auto">
+                  <h3 className="text-sm font-bold text-slate-900">Numerical Column Statistics</h3>
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
+                      <tr>
+                        <th className="px-3 py-2.5">Column</th>
+                        <th className="px-3 py-2.5">Count</th>
+                        <th className="px-3 py-2.5">Mean</th>
+                        <th className="px-3 py-2.5">Median</th>
+                        <th className="px-3 py-2.5">Std</th>
+                        <th className="px-3 py-2.5">Min</th>
+                        <th className="px-3 py-2.5">Max</th>
+                        <th className="px-3 py-2.5">Skew</th>
+                        <th className="px-3 py-2.5">Missing</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Distribution Charts */}
-          {eda.distributions && Object.keys(eda.distributions).length > 0 && (
-            <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-xl p-5">
-              <h3 className="text-sm font-bold text-slate-200 mb-4">Distributions</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {Object.entries(eda.distributions).slice(0, 6).map(([col, data]: [string, any]) => (
-                  <div key={col} className="bg-slate-900/40 rounded-xl p-4 border border-slate-800/30">
-                    <p className="text-xs font-semibold text-slate-300 mb-2">{col}</p>
-                    <ResponsiveContainer width="100%" height={180}>
-                      <BarChart data={
-                        data.type === 'histogram'
-                          ? data.counts.map((c: number, i: number) => ({
-                              bin: `${data.bins[i]?.toFixed(1)}`,
-                              count: c,
-                            }))
-                          : data.labels.map((l: string, i: number) => ({
-                              bin: l.length > 12 ? l.slice(0, 12) + '…' : l,
-                              count: data.counts[i],
-                            }))
-                      }>
-                        <XAxis dataKey="bin" tick={{ fontSize: 9, fill: '#94a3b8' }} interval="preserveStartEnd" />
-                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} />
-                        <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '12px' }} />
-                        <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                          {(data.type === 'histogram' ? data.counts : data.labels).map((_: any, i: number) => (
-                            <Cell key={i} fill={COLORS[i % COLORS.length]} fillOpacity={0.8} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Correlation Matrix */}
-          {eda.correlation?.columns?.length > 1 && (
-            <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-xl p-5 overflow-x-auto">
-              <h3 className="text-sm font-bold text-slate-200 mb-3">Correlation Matrix</h3>
-              <div className="inline-block">
-                <table className="text-xs">
-                  <thead>
-                    <tr>
-                      <th className="p-2"></th>
-                      {eda.correlation.columns.map((c: string) => (
-                        <th key={c} className="p-2 text-slate-400 font-medium max-w-[80px] truncate">{c}</th>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {eda.numerical_stats.map((s: any) => (
+                        <tr key={s.column} className="hover:bg-slate-50/60">
+                          <td className="px-3 py-2.5 font-bold text-slate-900 font-sans">{s.column}</td>
+                          <td className="px-3 py-2.5">{s.count}</td>
+                          <td className="px-3 py-2.5">{s.mean}</td>
+                          <td className="px-3 py-2.5">{s.median}</td>
+                          <td className="px-3 py-2.5">{s.std}</td>
+                          <td className="px-3 py-2.5">{s.min}</td>
+                          <td className="px-3 py-2.5">{s.max}</td>
+                          <td className={`px-3 py-2.5 ${Math.abs(s.skew) > 1 ? 'text-amber-600 font-bold' : ''}`}>{s.skew}</td>
+                          <td className={`px-3 py-2.5 ${s.missing > 0 ? 'text-rose-600 font-bold' : ''}`}>{s.missing_pct}%</td>
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {eda.correlation.columns.map((row: string) => (
-                      <tr key={row}>
-                        <td className="p-2 text-slate-400 font-medium">{row}</td>
-                        {eda.correlation.columns.map((col: string) => {
-                          const cell = eda.correlation.matrix.find((m: any) => m.x === row && m.y === col);
-                          const val = cell?.value ?? 0;
-                          const intensity = Math.abs(val);
-                          const bg = val > 0
-                            ? `rgba(56, 189, 248, ${intensity * 0.7})`
-                            : `rgba(248, 113, 113, ${intensity * 0.7})`;
-                          return (
-                            <td key={`${row}-${col}`} className="p-2 text-center font-mono rounded"
-                              style={{ backgroundColor: bg, color: intensity > 0.5 ? '#fff' : '#94a3b8' }}>
-                              {val.toFixed(2)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-          {/* Categorical Stats */}
-          {eda.categorical_stats?.length > 0 && (
-            <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-xl p-5">
-              <h3 className="text-sm font-bold text-slate-200 mb-3">Categorical Columns</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {eda.categorical_stats.map((s: any) => (
-                  <div key={s.column} className="bg-slate-900/40 rounded-xl p-4 border border-slate-800/30">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-semibold text-slate-200">{s.column}</span>
-                      <span className="text-xs text-slate-500 px-2 py-0.5 rounded-lg bg-slate-800/60">{s.unique} unique</span>
-                    </div>
-                    {s.top_categories?.slice(0, 5).map((cat: any) => (
-                      <div key={cat.value} className="flex items-center justify-between py-1.5">
-                        <span className="text-xs text-slate-400 truncate max-w-[150px]">{cat.value}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-2 bg-slate-800/60 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-700" style={{ width: `${cat.percentage}%` }} />
-                          </div>
-                          <span className="text-xs text-slate-500 font-mono w-12 text-right">{cat.percentage}%</span>
-                        </div>
+              {/* Distributions Grid */}
+              {eda.distributions && Object.keys(eda.distributions).length > 0 && (
+                <div className="glass-card border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+                  <h3 className="text-sm font-bold text-slate-900">Feature Distributions</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Object.entries(eda.distributions).slice(0, 6).map(([col, data]: [string, any]) => (
+                      <div key={col} className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <span className="text-xs font-bold text-slate-900">{col}</span>
+                        <ResponsiveContainer width="100%" height={160}>
+                          <BarChart data={data.bins ? data.bins.map((b: string, i: number) => ({ bin: b, count: data.counts[i] })) : []}>
+                            <XAxis dataKey="bin" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
+                            <YAxis tick={{ fontSize: 9 }} />
+                            <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '11px' }} />
+                            <Bar dataKey="count" fill="#2563eb" radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Correlation Matrix */}
+              {eda.correlation?.columns?.length > 1 && (
+                <div className="glass-card border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4 overflow-x-auto">
+                  <h3 className="text-sm font-bold text-slate-900">Correlation Matrix</h3>
+                  <div className="inline-block min-w-full">
+                    <table className="text-xs">
+                      <thead>
+                        <tr>
+                          <th className="p-2"></th>
+                          {eda.correlation.columns.map((c: string) => (
+                            <th key={c} className="p-2 text-slate-500 font-semibold max-w-[100px] truncate">{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {eda.correlation.columns.map((row: string) => (
+                          <tr key={row}>
+                            <td className="p-2 text-slate-700 font-semibold">{row}</td>
+                            {eda.correlation.columns.map((col: string) => {
+                              const cell = eda.correlation.matrix.find((m: any) => m.x === row && m.y === col);
+                              const val = cell?.value ?? 0;
+                              const intensity = Math.abs(val);
+                              const bg = val > 0 ? `rgba(37, 99, 235, ${intensity * 0.4})` : `rgba(225, 29, 72, ${intensity * 0.4})`;
+                              return (
+                                <td key={`${row}-${col}`} className="p-2 text-center font-mono rounded" style={{ backgroundColor: bg }}>
+                                  {val.toFixed(2)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!eda && !loading && (
+            <div className="glass-card border border-slate-200 rounded-2xl p-16 text-center space-y-3">
+              <BarChart3 className="w-12 h-12 text-slate-300 mx-auto" />
+              <h3 className="text-lg font-bold text-slate-800">No EDA Computed Yet</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Click "Compute EDA" above to calculate descriptive stats, correlations, and distribution frequencies.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: HYPOTHESIS TESTING & STATISTICAL INFERENCE */}
+      {activeSection === 'hypothesis' && (
+        <div className="space-y-6">
+          {/* Target Hypothesis Battery */}
+          <div className="glass-card p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                  Inferential Statistics
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                  Target Hypothesis Battery
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Automated significance testing (t-test, ANOVA, Chi-squared, Pearson/Spearman) against target column.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-500">Target:</span>
+                <select
+                  value={targetColumn}
+                  onChange={e => {
+                    setTargetColumn(e.target.value);
+                    loadStatisticalTests(selectedDataset, e.target.value);
+                  }}
+                  className="py-1.5 px-3 rounded-xl border border-slate-200 text-xs font-semibold bg-slate-50"
+                >
+                  <option value="">Default (Last column)</option>
+                  {allColumns.map((c: string) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {loadingStats ? (
+              <div className="py-12 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                Computing hypothesis tests across all variables...
+              </div>
+            ) : !statsData?.hypothesis_battery ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                No statistical battery data available. Click Compute EDA or select a target.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Executive Narrative */}
+                <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-100 text-blue-900 text-xs leading-relaxed">
+                  <div className="flex items-center gap-1.5 font-bold mb-1">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                    Statistical Significance Summary
+                  </div>
+                  {statsData.hypothesis_battery.executive_narrative}
+                </div>
+
+                {/* Significance Leaderboard Table */}
+                <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
+                      <tr>
+                        <th className="px-4 py-3">Feature</th>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Test Applied</th>
+                        <th className="px-4 py-3">Statistic</th>
+                        <th className="px-4 py-3">p-value</th>
+                        <th className="px-4 py-3">Significance</th>
+                        <th className="px-4 py-3">Effect Size</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {statsData.hypothesis_battery.tests?.map((test: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50/60 font-sans">
+                          <td className="px-4 py-3 font-bold text-slate-900">{test.feature}</td>
+                          <td className="px-4 py-3 text-slate-500 text-[11px] capitalize">{test.feature_type}</td>
+                          <td className="px-4 py-3 font-mono text-[11px] text-slate-600">{test.test_name}</td>
+                          <td className="px-4 py-3 font-mono">{test.statistic !== null ? test.statistic : '—'}</td>
+                          <td className="px-4 py-3 font-mono font-bold">
+                            {test.p_value !== null ? (test.p_value < 0.001 ? '< 0.001' : test.p_value) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              test.is_significant ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {test.is_significant ? 'Significant (p < 0.05)' : 'Not Significant'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 font-mono text-[11px]">{test.effect_size}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Interactive Pairwise Hypothesis Playground */}
+          <div className="glass-card p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-5">
+            <h3 className="text-base font-bold text-slate-900">Pairwise Hypothesis Testing Playground</h3>
+            <p className="text-xs text-slate-500">
+              Select any two features to run automated hypothesis tests (Welch's t-test, ANOVA, Chi-squared, or Pearson/Spearman) with effect sizes and recommended charts.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={colA}
+                onChange={e => setColA(e.target.value)}
+                className="py-2 px-3 rounded-xl border border-slate-300 text-xs font-semibold"
+              >
+                <option value="">Select Variable A...</option>
+                {allColumns.map((c: string) => (
+                  <option key={c} value={c}>Variable A: {c}</option>
+                ))}
+              </select>
+
+              <select
+                value={colB}
+                onChange={e => setColB(e.target.value)}
+                className="py-2 px-3 rounded-xl border border-slate-300 text-xs font-semibold"
+              >
+                <option value="">Select Variable B...</option>
+                {allColumns.map((c: string) => (
+                  <option key={c} value={c}>Variable B: {c}</option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleRunPairwiseTest}
+                disabled={runningPairwise || !colA || !colB}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm"
+              >
+                {runningPairwise ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Scale className="w-3.5 h-3.5" />}
+                Run Pairwise Test
+              </button>
+            </div>
+
+            {pairwiseResult && (
+              <div className="mt-4 p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                    {pairwiseResult.test_name || 'Statistical Test Result'}
+                  </h4>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                    pairwiseResult.is_significant ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {pairwiseResult.is_significant ? 'Statistically Significant' : 'No Significant Difference'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                  {pairwiseResult.interpretation}
+                </p>
+
+                {chartRec && (
+                  <div className="pt-3 border-t border-slate-200 text-xs flex items-start gap-2 text-slate-600">
+                    <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-slate-900">Recommended Visualization: </span>
+                      <span className="capitalize font-semibold text-blue-700">{chartRec.primary_chart?.replace(/_/g, ' ')}</span>
+                      <p className="text-slate-500 text-[11px] mt-0.5">{chartRec.explanation}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Normality Diagnostics Cards */}
+          {statsData?.normality_tests?.length > 0 && (
+            <div className="glass-card p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="text-base font-bold text-slate-900">Continuous Variable Normality Diagnostics</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {statsData.normality_tests.map((n: any) => (
+                  <div key={n.column} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 text-xs">{n.column}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        n.is_normal ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {n.is_normal ? 'Normal' : 'Non-Normal'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-snug">{n.interpretation}</p>
+                    <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono pt-1">
+                      <span>Skew: {n.skewness}</span>
+                      <span>Kurtosis: {n.kurtosis}</span>
+                      <span>p: {n.p_value}</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -383,17 +591,44 @@ export const EDA: React.FC = () => {
         </div>
       )}
 
-      {!eda && !loading && (
-        <div className="animate-fade-in-up glass-card border border-slate-800/50 rounded-2xl p-16 text-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center mx-auto">
-            <BarChart3 className="w-8 h-8 text-sky-400/60" />
+      {/* TAB 3: AUTO-EDA EXECUTIVE REPORT */}
+      {activeSection === 'report' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Automated EDA Executive Report</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Publication-ready synthesis of distributions, correlations, and key predictors.</p>
+            </div>
+
+            <button
+              onClick={downloadMarkdownReport}
+              disabled={!reportData?.markdown_report}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Report (.md)
+            </button>
           </div>
-          <h3 className="text-xl font-bold text-slate-200">No Analysis Yet</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto">Select a dataset and click "Run EDA" to generate real statistics</p>
-          <div className="flex items-center justify-center gap-2 text-sky-400">
-            <ArrowRight className="w-4 h-4" />
-            <span className="text-sm font-medium">Choose a dataset to begin</span>
-          </div>
+
+          {loadingReport ? (
+            <div className="py-20 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+              Compiling comprehensive Auto-EDA report...
+            </div>
+          ) : !reportData ? (
+            <div className="glass-card text-center py-16 rounded-3xl border border-slate-200">
+              <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-xs text-slate-500">No report generated yet.</p>
+            </div>
+          ) : (
+            <div className="glass-card p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+              <div className="prose prose-sm max-w-none text-slate-800 leading-relaxed font-sans">
+                <pre className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-xs font-mono whitespace-pre-wrap text-slate-800">
+                  {reportData.markdown_report}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

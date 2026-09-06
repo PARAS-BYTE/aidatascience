@@ -7,6 +7,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.db.models import User
+from app.api.deps import get_current_user
 from app.services.forecasting_service import ForecastingService
 from app.core.logging import logger
 
@@ -24,6 +26,7 @@ def forecast_dataset(
     dataset_id: str,
     request: ForecastRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Generate time-series projections, confidence intervals, trend decomposition,
@@ -33,6 +36,7 @@ def forecast_dataset(
         return ForecastingService.run_forecast(
             db=db,
             dataset_id=dataset_id,
+            user_id=current_user.id,
             date_column=request.date_column,
             value_column=request.value_column,
             horizon=request.horizon,

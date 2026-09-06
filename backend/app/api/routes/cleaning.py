@@ -3,7 +3,8 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
-from app.db.models import Dataset
+from app.db.models import Dataset, User
+from app.api.deps import get_current_user
 from app.services.profiler import DatasetProfiler
 from app.schemas.dataset import CleaningIssues, CleaningRequest, CleaningResponse
 from ml_engine.preprocessing.cleaning_engine import CleaningEngine
@@ -12,9 +13,13 @@ router = APIRouter(prefix="/datasets", tags=["Cleaning"])
 
 
 @router.get("/{dataset_id}/cleaning-issues", response_model=CleaningIssues)
-def get_cleaning_issues(dataset_id: str, db: Session = Depends(get_db)):
+def get_cleaning_issues(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Detect data quality issues without modifying the dataset."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
@@ -24,9 +29,14 @@ def get_cleaning_issues(dataset_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{dataset_id}/clean", response_model=CleaningResponse)
-def clean_dataset(dataset_id: str, request: CleaningRequest, db: Session = Depends(get_db)):
+def clean_dataset(
+    dataset_id: str,
+    request: CleaningRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Clean dataset and save cleaned version."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
@@ -54,12 +64,26 @@ def clean_dataset(dataset_id: str, request: CleaningRequest, db: Session = Depen
     # Save cleaned version
     import os
     from app.core.config import settings
+    from app.db.models import DatasetVersion
+
     cleaned_path = os.path.join(settings.PROCESSED_DIR, f"cleaned_{dataset.stored_filename}")
     cleaned_df.to_csv(cleaned_path, index=False)
 
     dataset.cleaned_file_path = cleaned_path
     dataset.target_column = request.target
     dataset.cleaning_config = json.dumps(report)
+    dataset.version = (dataset.version or 1) + 1
+
+    new_version = DatasetVersion(
+        dataset_id=dataset.id,
+        version=dataset.version,
+        file_path=cleaned_path,
+        file_size=os.path.getsize(cleaned_path) if os.path.exists(cleaned_path) else 0,
+        row_count=len(cleaned_df),
+        column_count=len(cleaned_df.columns),
+        change_summary=f"Automated cleaning: {report.get('changes_made', ['Applied data cleaning'])[0] if isinstance(report.get('changes_made'), list) and report.get('changes_made') else 'Applied data cleaning'}",
+    )
+    db.add(new_version)
     db.commit()
 
     report["dataset_id"] = dataset_id
@@ -74,9 +98,13 @@ from app.schemas.dataset import PipelineStepCreate, PipelineStepUpdate, Pipeline
 
 
 @router.get("/{dataset_id}/pipeline")
-def get_pipeline_steps(dataset_id: str, db: Session = Depends(get_db)):
+def get_pipeline_steps(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List all pipeline steps for a dataset."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
@@ -99,9 +127,14 @@ def get_pipeline_steps(dataset_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{dataset_id}/pipeline")
-def add_pipeline_step(dataset_id: str, step_data: PipelineStepCreate, db: Session = Depends(get_db)):
+def add_pipeline_step(
+    dataset_id: str,
+    step_data: PipelineStepCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Add a new step to the cleaning pipeline."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
@@ -140,8 +173,18 @@ def add_pipeline_step(dataset_id: str, step_data: PipelineStepCreate, db: Sessio
 
 
 @router.patch("/{dataset_id}/pipeline/{step_id}")
-def update_pipeline_step(dataset_id: str, step_id: str, update_data: PipelineStepUpdate, db: Session = Depends(get_db)):
+def update_pipeline_step(
+    dataset_id: str,
+    step_id: str,
+    update_data: PipelineStepUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Toggle or update a pipeline step."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     step = db.query(PipelineStep).filter(
         PipelineStep.id == step_id,
         PipelineStep.dataset_id == dataset_id
@@ -177,8 +220,17 @@ def update_pipeline_step(dataset_id: str, step_id: str, update_data: PipelineSte
 
 
 @router.delete("/{dataset_id}/pipeline/{step_id}")
-def delete_pipeline_step(dataset_id: str, step_id: str, db: Session = Depends(get_db)):
+def delete_pipeline_step(
+    dataset_id: str,
+    step_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a step from the pipeline."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     step = db.query(PipelineStep).filter(
         PipelineStep.id == step_id,
         PipelineStep.dataset_id == dataset_id
@@ -203,9 +255,13 @@ def delete_pipeline_step(dataset_id: str, step_id: str, db: Session = Depends(ge
 
 
 @router.post("/{dataset_id}/pipeline/replay")
-def replay_pipeline_endpoint(dataset_id: str, db: Session = Depends(get_db)):
+def replay_pipeline_endpoint(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Re-execute all active pipeline steps from the raw dataset."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
     if not dataset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
@@ -214,8 +270,17 @@ def replay_pipeline_endpoint(dataset_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{dataset_id}/pipeline/{step_id}/diff")
-def get_pipeline_step_diff(dataset_id: str, step_id: str, db: Session = Depends(get_db)):
+def get_pipeline_step_diff(
+    dataset_id: str,
+    step_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get before and after stats for a specific step."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.user_id == current_user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
     try:
         diff = PipelineService.get_step_diff(dataset_id, step_id, db)
         return diff

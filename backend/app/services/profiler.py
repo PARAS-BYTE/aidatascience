@@ -18,10 +18,12 @@ class DatasetProfiler:
                     df = pd.read_csv(file_path, encoding='latin1')
             elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
+            elif file_path.endswith('.parquet'):
+                df = pd.read_parquet(file_path)
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Unsupported file extension. Only CSV, XLSX, and XLS files are supported.",
+                    detail="Unsupported file extension. Only CSV, XLSX, XLS, and Parquet files are supported.",
                 )
         except HTTPException:
             raise

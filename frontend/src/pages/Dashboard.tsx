@@ -33,6 +33,8 @@ function useCountUp(end: number, duration: number = 1200) {
   return count;
 }
 
+import { useAuthStore } from '../store/authStore';
+
 // Skeleton card for loading
 const SkeletonCard = () => (
   <div className="glass-card rounded-2xl p-5 shadow-xl">
@@ -47,12 +49,26 @@ const SkeletonCard = () => (
 );
 
 export const Dashboard: React.FC = () => {
+  const user = useAuthStore((s) => s.user);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) {
+      setStats({
+        datasets: 0,
+        experiments: 0,
+        models: 0,
+        deployed_models: 0,
+        recent_datasets: [],
+        recent_experiments: [],
+      });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     apiService.getDashboard().then(setStats).catch(() => setStats(null)).finally(() => setLoading(false));
-  }, []);
+  }, [user]);
 
   const datasetCount = useCountUp(stats?.datasets ?? 0);
   const experimentCount = useCountUp(stats?.experiments ?? 0);
